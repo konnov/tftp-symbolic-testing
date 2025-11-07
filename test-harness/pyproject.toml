@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "tftp-test-harness"
+version = "0.1.0"
+description = "Test harness for TFTP protocol using Apalache symbolic execution"
+authors = ["Igor Konnov"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+requests = "^2.31.0"
+itf = "^3.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

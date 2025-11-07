@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  tftp-server:
+    build: .
+    container_name: tftp-server
+    networks:
+      tftp-net:
+        ipv4_address: 10.0.0.1
+    environment:
+      - SERVER_IP=10.0.0.1
+      - PORT_RANGE=1024:1027
+    ports:
+      - "69:69/udp"
+      - "1024-1027:1024-1027/udp"
+    volumes:
+      - ./files:/var/tftpboot:ro
+
+  tftp-client-1:
+    build: .
+    container_name: tftp-client-1
+    networks:
+      tftp-net:
+        ipv4_address: 10.0.0.2
+    environment:
+      - CLIENT_IP=10.0.0.2
+      - SERVER_IP=10.0.0.1
+    ports:
+      - "5001:5000"
+    command: python3 /usr/local/bin/tftp_client.py --client-ip 10.0.0.2 --server-ip 10.0.0.1 --control-port 5000
+    depends_on:
+      - tftp-server
+
+  tftp-client-2:
+    build: .
+    container_name: tftp-client-2
+    networks:
+      tftp-net:
+        ipv4_address: 10.0.0.3
+    environment:
+      - CLIENT_IP=10.0.0.3
+      - SERVER_IP=10.0.0.1
+    ports:
+      - "5002:5000"
+    command: python3 /usr/local/bin/tftp_client.py --client-ip 10.0.0.3 --server-ip 10.0.0.1 --control-port 5000
+    depends_on:
+      - tftp-server
+
+networks:
+  tftp-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.0.0.0/24
