@@ -37,7 +37,10 @@ VARIABLES
     \* A global clock to model timeouts (not specified in the RFCs).
     \* We assume that the clocks are synchronized.
     \* @type: Int;
-    clock
+    clock,
+    \* The last action taken in the system.
+    \* @type: $action;
+    lastAction
 
 \* The set of TFTP options introduced in RFCs 2348-2349
 OPTIONS_RFC2349 == {"blksize", "tsize", "timeout"}
@@ -73,6 +76,7 @@ Init ==
         ]
     \* the clock value is not essential here, it could be arbitrary
     /\ clock = 0
+    /\ lastAction = ActionInit
 
 (********************* Send and Receive RRQ **************************)
 
@@ -108,13 +112,14 @@ ClientSendRRQ(_srcIp, _srcPort, _filename, _options) ==
             ELSE clientTransfers[p]
         ]
     /\ packets' = packets \cup {udp}
+    /\ lastAction' = ActionClientSendRRQ(udp)
     /\ UNCHANGED <<serverTransfers, clock>>
 
 \* Utility action: Send DATA in response to RRQ, as per RFC 1350 and RFC 2347.
 \* See ServerRecvRRQ below.
 \* @type: ({ opcode: Int, filename: Str, mode: Str, options: Str -> Int },
-\*           <<Str, Int>>, Int) => Bool;
-_ServerSendDataOnRrq(_rrq, _clientIpAndPort, _newServerPort) ==
+\*           <<Str, Int>>, Int, $udpPacket) => Bool;
+_ServerSendDataOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
     \E timeout \in 1..255:
         LET dataSize == Min(512, FILES[_rrq.filename])
             dataPacket == [
@@ -142,13 +147,14 @@ _ServerSendDataOnRrq(_rrq, _clientIpAndPort, _newServerPort) ==
                 THEN newTransfer
                 ELSE serverTransfers[p]
             ]
+        /\ lastAction' = ActionRecvSend(_rcvdPacket, dataPacket)
         /\ UNCHANGED <<clientTransfers, clock>>
 
 \* Utility action: Send OACK in response to RRQ, as per RFC 2347.
 \* See ServerRecvRRQ below.
 \* @type: ({ opcode: Int, filename: Str, mode: Str, options: Str -> Int },
-\*           <<Str, Int>>, Int) => Bool;
-_ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort) ==
+\*           <<Str, Int>>, Int, $udpPacket) => Bool;
+_ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
     \E optionsSubset \in SUBSET DOMAIN _rrq.options,
             blksize \in 0..65464, timeout \in 1..255:
         \* RFC 2349, Section 3.1: "If the server is willing to accept
@@ -163,12 +169,15 @@ _ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort) ==
         \* In Read Request packets, a size of "0" is specified in the request
         \* and the size of the file, in octets, is returned in the OACK.
         /\ "tsize" \notin DOMAIN _rrq.options \/ _rrq.options["tsize"] = 0
-        /\  LET oackOptions == mk_options(optionsSubset, blksize, 0, timeout) IN
-            packets' = packets \union {[
-                srcIp |-> SERVER_IP, srcPort |-> _newServerPort,
-                destIp |-> _clientIpAndPort[1], destPort |-> _clientIpAndPort[2],
-                payload |-> OACK(oackOptions)
-            ]}
+        /\  LET oackOptions == mk_options(optionsSubset, blksize, 0, timeout)
+                oackPacket == [
+                    srcIp |-> SERVER_IP, srcPort |-> _newServerPort,
+                    destIp |-> _clientIpAndPort[1], destPort |-> _clientIpAndPort[2],
+                    payload |-> OACK(oackOptions)
+                ]
+            IN
+            /\ packets' = packets \union {oackPacket}
+            /\ lastAction' = ActionRecvSend(_rcvdPacket, oackPacket)
         /\  serverTransfers' = [
                 p \in DOMAIN serverTransfers \union {_clientIpAndPort} |->
                 IF p = _clientIpAndPort
@@ -185,14 +194,17 @@ _ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort) ==
 \* At this point, we assume that the server can simply error when it wants to.
 \* See ServerRecvRRQ below.
 \* @type: ({ opcode: Int, filename: Str, mode: Str, options: Str -> Int },
-\*           <<Str, Int>>) => Bool;
-_ServerSendErrorOnRrq(_rrq, _clientIpAndPort) ==
+\*           <<Str, Int>>, $udpPacket) => Bool;
+_ServerSendErrorOnRrq(_rrq, _clientIpAndPort, _rcvdPacket) ==
     \E errorCode \in DOMAIN ALL_ERRORS:
-        /\  packets' = packets \union {[
+        LET errorPacket == [
                 srcIp |-> SERVER_IP, srcPort |-> 69,
                 destIp |-> _clientIpAndPort[1], destPort |-> _clientIpAndPort[2],
                 payload |-> ERROR(errorCode, ALL_ERRORS[errorCode])
-            ]}
+            ]
+        IN
+        /\  packets' = packets \union {errorPacket}
+        /\ lastAction' = ActionRecvSend(_rcvdPacket, errorPacket)
         \* do not introduce a new transfer entry on error
         /\  UNCHANGED <<serverTransfers, clientTransfers, clock>>
 
@@ -212,9 +224,9 @@ ServerRecvRRQ(_udp) ==
             /\ \A p \in DOMAIN serverTransfers:
                 serverTransfers[p].port /= newServerPort
             \* According to RFC 2347, the server may respond with DATA or OACK
-            /\  \/ _ServerSendDataOnRrq(rrq, clientIpAndPort, newServerPort)
-                \/ _ServerSendOackOnRrq(rrq, clientIpAndPort, newServerPort)
-                \/ _ServerSendErrorOnRrq(rrq, clientIpAndPort)
+            /\  \/ _ServerSendDataOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
+                \/ _ServerSendOackOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
+                \/ _ServerSendErrorOnRrq(rrq, clientIpAndPort, _udp)
 
 (************************* Receive OACK *******************************)
 
@@ -264,6 +276,7 @@ ClientRecvOACK(_udp) ==
                 /\  clientTransfers' =
                         [ clientTransfers EXCEPT ![ipPort] = newTransfer ]
                 /\  packets' = packets \union { ackPacket }
+                /\ lastAction' = ActionRecvSend(_udp, ackPacket)
             \/  \* the client may also reject the OACK by sending an ERROR
                 LET errorPacket == [
                     srcIp |-> _udp.destIp,
@@ -278,6 +291,7 @@ ClientRecvOACK(_udp) ==
                         p \in DOMAIN clientTransfers \ { ipPort } |->
                             clientTransfers[p]
                     ]
+                /\ lastAction' = ActionRecvSend(_udp, errorPacket)
     /\ UNCHANGED <<serverTransfers, clock>>
 
 (********************* Send and Receive DATA **************************)
@@ -331,6 +345,7 @@ ClientRecvDATA(_udp) ==
         \* TODO: close the connection when the last block is received
         \* send the ACK for the received DATA
         /\ packets' = packets \union { ackPacket }
+        /\ lastAction' = ActionRecvSend(_udp, ackPacket)
     /\ UNCHANGED <<serverTransfers, clock>>
 
 \* The server receives an ACK packet and sends DATA (RRQ transfer).
@@ -371,6 +386,7 @@ ServerSendDATA(_udp) ==
         /\ serverTransfers' = [ serverTransfers EXCEPT ![ipPort] = newTransfer ]
         \* send the DATA for the next block
         /\ packets' = packets \union { dataPacket }
+        /\ lastAction' = ActionRecvSend(_udp, dataPacket)
     /\ UNCHANGED <<clientTransfers, clock>>
 
 \* The server receives an ACK packet and closes the connection (RRQ transfer).
@@ -395,6 +411,7 @@ ServerRecvAckAndCloseConn(_udp) ==
         /\ serverTransfers' = [ p \in DOMAIN serverTransfers \ { ipPort } |->
                 serverTransfers[p]
             ]
+    /\ lastAction' = ActionRecvClose(_udp)
     /\ UNCHANGED <<packets, clientTransfers, clock>>
 
 (************************** Error handling ******************************)
@@ -416,6 +433,7 @@ ServerRecvErrorAndCloseConn(_udp) ==
                 p \in DOMAIN serverTransfers \ { ipPort } |->
                     serverTransfers[p]
             ]
+    /\ lastAction' = ActionRecvClose(_udp)
     /\ UNCHANGED <<packets, clientTransfers, clock>>
 
 \* The client receives an ERROR packet and closes the connection.
@@ -435,6 +453,7 @@ ClientRecvErrorAndCloseConn(_udp) ==
                 p \in DOMAIN clientTransfers \ { ipPort } |->
                     clientTransfers[p]
             ]
+    /\ lastAction' = ActionRecvClose(_udp)
     /\ UNCHANGED <<packets, serverTransfers, clock>>
 
 (******************************* Time ***********************************)
@@ -443,6 +462,7 @@ ClientRecvErrorAndCloseConn(_udp) ==
 \* The choice of the interval is dictated by the TFTP timeout option range.
 AdvanceClock(delta) ==
     /\ clock' = clock + delta
+    /\ lastAction' = ActionAdvanceClock(delta)
     /\ UNCHANGED <<packets, serverTransfers, clientTransfers>>
 
 \* The server drops a connection due to timeout.
@@ -453,6 +473,7 @@ ServerTimeout(ipPort) ==
         /\ serverTransfers' = [ p \in DOMAIN serverTransfers \ { ipPort } |->
                 serverTransfers[p]
             ]
+    /\ lastAction' = ActionServerTimeout(ipPort)
     /\ UNCHANGED <<packets, clientTransfers, clock>>
 
 \* A client drops a connection due to timeout.
@@ -463,6 +484,7 @@ ClientTimeout(ipPort) ==
         /\ clientTransfers' = [ p \in DOMAIN clientTransfers \ { ipPort } |->
                 clientTransfers[p]
             ]
+    /\ lastAction' = ActionClientTimeout(ipPort)
     /\ UNCHANGED <<packets, serverTransfers, clock>>
 
 (********************* The Next-state relation **************************)

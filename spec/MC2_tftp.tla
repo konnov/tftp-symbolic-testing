@@ -30,7 +30,10 @@ VARIABLES
     \* A global clock to model timeouts (not specified in the RFCs).
     \* We assume that the clocks are synchronized.
     \* @type: Int;
-    clock
+    clock,
+    \* The last action taken in the system.
+    \* @type: $action;
+    lastAction
 
 INSTANCE tftp
 

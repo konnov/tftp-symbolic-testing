@@ -66,6 +66,16 @@ OPCODE_OACK == 6
     // The test harness should manage the actual bytes.
     blocks: Seq(Int)
   };
+
+  // Action types for tracking the last action taken
+  @typeAlias: action =
+      ActionInit(UNIT)
+    | ActionClientSendRRQ({ sent: $udpPacket })
+    | ActionClientTimeout({ ipPort: <<Str, Int>> })
+    | ActionServerTimeout({ ipPort: <<Str, Int>> })
+    | ActionAdvanceClock({ delta: Int })
+    | ActionRecvSend({ rcvd: $udpPacket, sent: $udpPacket })
+    | ActionRecvClose({ rcvd: $udpPacket });
  *)
 typedefs_aliases == TRUE
 
@@ -138,5 +148,28 @@ AsERROR(_packet) == VariantGetUnsafe("ERROR", _packet)
 UDPPacket(_srcIp, _srcPort, _destIp, _destPort, _payload) ==
   [srcIp |-> _srcIp, srcPort |-> _srcPort,
    destIp |-> _destIp, destPort |-> _destPort, payload |-> _payload]
+
+\* Constructors for action variants
+
+\* @type: () => $action;
+ActionInit == Variant("ActionInit", "u_OF_UNIT")
+
+\* @type: ($udpPacket) => $action;
+ActionClientSendRRQ(_sent) == Variant("ActionClientSendRRQ", [sent |-> _sent])
+
+\* @type: (<<Str, Int>>) => $action;
+ActionClientTimeout(_ipPort) == Variant("ActionClientTimeout", [ipPort |-> _ipPort])
+
+\* @type: (<<Str, Int>>) => $action;
+ActionServerTimeout(_ipPort) == Variant("ActionServerTimeout", [ipPort |-> _ipPort])
+
+\* @type: (Int) => $action;
+ActionAdvanceClock(_delta) == Variant("ActionAdvanceClock", [delta |-> _delta])
+
+\* @type: ($udpPacket, $udpPacket) => $action;
+ActionRecvSend(_rcvd, _sent) == Variant("ActionRecvSend", [rcvd |-> _rcvd, sent |-> _sent])
+
+\* @type: ($udpPacket) => $action;
+ActionRecvClose(_rcvd) == Variant("ActionRecvClose", [rcvd |-> _rcvd])
 
 ===============================================================================
