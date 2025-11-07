@@ -214,41 +214,18 @@ class TftpTestHarness:
             trace_result = self.client.query(kinds=["TRACE"])
             trace_json = trace_result.get('trace', {})
 
-            # Try to decode the ITF trace using itf-py
+            # Decode the ITF trace using itf-py
             # The trace follows ITF format (ADR-015): https://apalache-mc.org/docs/adr/015adr-trace.html
-            try:
-                trace = trace_from_json(trace_json)
-                states = trace.states
-                self.log.info(f"Retrieved trace with {len(states)} states (decoded with itf-py)")
-                use_itf = True
-            except (AttributeError, KeyError) as e:
-                # itf-py may fail on certain variant types (e.g., unit types)
-                # Fall back to manual JSON parsing
-                self.log.warning(f"itf-py decoding failed: {e}, falling back to manual JSON parsing")
-                states = trace_json.get('states', [])
-                self.log.info(f"Retrieved trace with {len(states)} states (manual JSON)")
-                use_itf = False
+            trace = trace_from_json(trace_json)
+            self.log.info(f"Retrieved trace with {len(trace.states)} states")
 
-            if states:
+            if trace.states:
                 # Get the last state in the trace
-                if use_itf:
-                    # itf-py decoded State object
-                    itf_state = states[-1]
-                    state_index = itf_state.meta.get('index', '?')
-                    state_values = itf_state.values
-                else:
-                    # Raw JSON dict
-                    json_state = states[-1]
-                    state_index = json_state.get('#meta', {}).get('index', '?')  # type: ignore
-                    state_values = {k: v for k, v in json_state.items() if k != '#meta'}  # type: ignore
+                current_state = trace.states[-1]
+                state_index = current_state.meta.get('index', '?')
+                state_values = current_state.values
 
                 self.log.info(f"Current state index: {state_index}")
-
-                # state_values should be a dictionary
-                if not isinstance(state_values, dict):
-                    self.log.error(f"Unexpected state values type: {type(state_values)}, value: {state_values}")
-                    return None
-
                 self.log.info(f"Current state keys: {state_values.keys()}")
 
                 # Extract lastAction from the state
@@ -257,25 +234,18 @@ class TftpTestHarness:
                     self.log.warning("No lastAction in current state")
                     return None
 
-                # For manual JSON, lastAction is a dict with 'tag' and 'value'
-                # For itf-py, it would be a namedtuple, but we're using manual JSON for now
-                if isinstance(last_action, dict):
-                    action_tag = last_action.get('tag', 'Unknown')
-                    action_value = last_action.get('value', {})
-                else:
-                    # itf-py decoded variant
-                    action_tag = last_action.tag
-                    action_value = last_action.value
-
-                self.log.info(f"lastAction tag: {action_tag}")
-                self.log.info(f"lastAction value type: {type(action_value)}")
+                # With itf-py 0.4.1+, variants are decoded as typed namedtuples
+                # The type name is the tag (e.g., 'ActionInit', 'ActionClientSendRRQ')
+                action_tag = type(last_action).__name__
+                self.log.info(f"lastAction type: {action_tag}")
+                self.log.info(f"lastAction fields: {last_action._fields if hasattr(last_action, '_fields') else 'N/A'}")
 
                 # Determine the TFTP operation based on the action tag
                 operation = {
                     'transition_id': transition_id,
                     'timestamp': time.time(),
                     'action_tag': action_tag,
-                    'action_value': action_value,
+                    'action_value': last_action,
                 }
 
                 # Parse the action to determine what TFTP command to send
@@ -285,16 +255,14 @@ class TftpTestHarness:
 
                 elif action_tag == 'ActionClientSendRRQ':
                     self.log.info("Action: Client sends RRQ")
-                    # action_value should be a dict with 'sent' key
-                    sent_packet = action_value.get('sent') if isinstance(action_value, dict) else action_value.sent
+                    sent_packet = last_action.sent
                     operation['command'] = 'send_rrq'
                     operation['packet'] = sent_packet
                     # TODO: Send RRQ command to Docker client
 
                 elif action_tag == 'ActionRecvSend':
-                    # action_value should have 'rcvd' and 'sent' fields
-                    rcvd_packet = action_value.get('rcvd') if isinstance(action_value, dict) else action_value.rcvd
-                    sent_packet = action_value.get('sent') if isinstance(action_value, dict) else action_value.sent
+                    rcvd_packet = last_action.rcvd
+                    sent_packet = last_action.sent
                     self.log.info(f"Action: Receive and Send")
                     self.log.info(f"  Received packet type: {type(rcvd_packet)}")
                     self.log.info(f"  Sent packet type: {type(sent_packet)}")
@@ -304,7 +272,7 @@ class TftpTestHarness:
                     # TODO: Send appropriate command to Docker client based on packet types
 
                 elif action_tag == 'ActionRecvClose':
-                    rcvd_packet = action_value.get('rcvd') if isinstance(action_value, dict) else action_value.rcvd
+                    rcvd_packet = last_action.rcvd
                     self.log.info(f"Action: Receive and Close")
                     self.log.info(f"  Received packet type: {type(rcvd_packet)}")
                     operation['command'] = 'recv_close'
@@ -312,21 +280,21 @@ class TftpTestHarness:
                     # TODO: Close the connection
 
                 elif action_tag == 'ActionClientTimeout':
-                    ip_port = action_value.get('ipPort') if isinstance(action_value, dict) else action_value.ipPort
+                    ip_port = last_action.ipPort
                     self.log.info(f"Action: Client Timeout on {ip_port}")
                     operation['command'] = 'client_timeout'
                     operation['ip_port'] = ip_port
                     # TODO: Handle client timeout
 
                 elif action_tag == 'ActionServerTimeout':
-                    ip_port = action_value.get('ipPort') if isinstance(action_value, dict) else action_value.ipPort
+                    ip_port = last_action.ipPort
                     self.log.info(f"Action: Server Timeout on {ip_port}")
                     operation['command'] = 'server_timeout'
                     operation['ip_port'] = ip_port
                     # TODO: Handle server timeout
 
                 elif action_tag == 'ActionAdvanceClock':
-                    delta = action_value.get('delta') if isinstance(action_value, dict) else action_value.delta
+                    delta = last_action.delta
                     self.log.info(f"Action: Advance Clock by {delta}")
                     operation['command'] = 'advance_clock'
                     operation['delta'] = delta
