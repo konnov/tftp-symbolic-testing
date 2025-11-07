@@ -173,7 +173,7 @@ class TftpClient:
         else:
             return {'opcode': opcode, 'opcode_name': 'UNKNOWN'}
 
-    def send_rrq(self, filename: str, options: Optional[Dict[str, int]] = None, 
+    def send_rrq(self, filename: str, options: Optional[Dict[str, int]] = None,
                  source_port: Optional[int] = None) -> Dict[str, Any]:
         """
         Send a Read Request and handle the response.
@@ -288,16 +288,23 @@ class TftpClient:
         cmd_type = command.get('type')
 
         if cmd_type == 'rrq':
+            filename = command.get('filename')
+            if not filename:
+                return {'error': 'Missing required field: filename'}
             return self.send_rrq(
-                filename=command.get('filename'),
+                filename=filename,
                 options=command.get('options'),
                 source_port=command.get('source_port')
             )
 
         elif cmd_type == 'ack':
+            block_num = command.get('block_num')
+            dest_port = command.get('dest_port')
+            if block_num is None or dest_port is None:
+                return {'error': 'Missing required fields: block_num or dest_port'}
             return self.send_ack(
-                block_num=command.get('block_num'),
-                dest_port=command.get('dest_port'),
+                block_num=block_num,
+                dest_port=dest_port,
                 source_port=command.get('source_port')
             )
 
