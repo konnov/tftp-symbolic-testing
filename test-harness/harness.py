@@ -202,25 +202,43 @@ class TftpTestHarness:
         Returns:
             Dictionary containing the operation details and response
         """
-        # TODO: Implement actual TFTP operation execution
-        # This would involve:
-        # - Querying Apalache for the transition details
-        # - Sending commands to the TFTP client in Docker
-        # - Collecting UDP packet responses
-        # - Parsing the responses
+        if not self.client:
+            raise RuntimeError("Client not initialized")
 
         self.log.info(f"Executing TFTP operation for transition {transition_id}")
 
-        # For now, return a placeholder
-        operation = {
-            'transition_id': transition_id,
-            'timestamp': time.time(),
-            # Actual implementation would include:
-            # 'command': {...},
-            # 'response': {...},
-        }
+        # Query Apalache for the transition details using TRACE
+        try:
+            trace_result = self.client.query(kinds=["TRACE"])
+            trace = trace_result.get('trace', [])
 
-        return operation
+            self.log.info(f"Retrieved trace with {len(trace)} states")
+            if trace:
+                # The last state in the trace represents the current state after the transition
+                current_state = trace[-1] if trace else {}
+                self.log.info(f"Current state: {json.dumps(current_state, indent=2)}")
+
+            # TODO: Parse the trace to determine the TFTP operation
+            # - Extract relevant state variables (packets, serverTransfers, clientTransfers, etc.)
+            # - Determine what TFTP command to send based on the state
+            # - Send commands to the TFTP client in Docker
+            # - Collect UDP packet responses
+            # - Parse the responses
+
+            operation = {
+                'transition_id': transition_id,
+                'timestamp': time.time(),
+                'trace': trace,
+                # Actual implementation would include:
+                # 'command': {...},
+                # 'response': {...},
+            }
+
+            return operation
+
+        except Exception as e:
+            self.log.error(f"Error querying transition details: {e}", exc_info=True)
+            return None
 
     def push_constraints_to_apalache(self, udp_packet: Dict[str, Any]) -> bool:
         """
