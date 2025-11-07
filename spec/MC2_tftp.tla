@@ -8,7 +8,7 @@ EXTENDS Apalache
 
 SERVER_IP == "10.0.0.1"
 CLIENT_IPS == {"10.0.0.2", "10.0.0.3"}
-PORTS == { 1024, 10000, 65000 }
+PORTS == 1024..1027
 FILES == SetAsFun({
     <<"file1", 1024>>,
     <<"file2", 2099>>,
