@@ -21,6 +21,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from itf_py import Trace, trace_from_json
+
 from client import (
     JsonRpcClient,
     AssumptionDisabled,
@@ -210,31 +212,134 @@ class TftpTestHarness:
         # Query Apalache for the transition details using TRACE
         try:
             trace_result = self.client.query(kinds=["TRACE"])
-            trace = trace_result.get('trace', [])
+            trace_json = trace_result.get('trace', {})
 
-            self.log.info(f"Retrieved trace with {len(trace)} states")
-            if trace:
-                # The last state in the trace represents the current state after the transition
-                current_state = trace[-1] if trace else {}
-                self.log.info(f"Current state: {json.dumps(current_state, indent=2)}")
+            # Try to decode the ITF trace using itf-py
+            # The trace follows ITF format (ADR-015): https://apalache-mc.org/docs/adr/015adr-trace.html
+            try:
+                trace = trace_from_json(trace_json)
+                states = trace.states
+                self.log.info(f"Retrieved trace with {len(states)} states (decoded with itf-py)")
+                use_itf = True
+            except (AttributeError, KeyError) as e:
+                # itf-py may fail on certain variant types (e.g., unit types)
+                # Fall back to manual JSON parsing
+                self.log.warning(f"itf-py decoding failed: {e}, falling back to manual JSON parsing")
+                states = trace_json.get('states', [])
+                self.log.info(f"Retrieved trace with {len(states)} states (manual JSON)")
+                use_itf = False
 
-            # TODO: Parse the trace to determine the TFTP operation
-            # - Extract relevant state variables (packets, serverTransfers, clientTransfers, etc.)
-            # - Determine what TFTP command to send based on the state
-            # - Send commands to the TFTP client in Docker
-            # - Collect UDP packet responses
-            # - Parse the responses
+            if states:
+                # Get the last state in the trace
+                if use_itf:
+                    # itf-py decoded State object
+                    itf_state = states[-1]
+                    state_index = itf_state.meta.get('index', '?')
+                    state_values = itf_state.values
+                else:
+                    # Raw JSON dict
+                    json_state = states[-1]
+                    state_index = json_state.get('#meta', {}).get('index', '?')  # type: ignore
+                    state_values = {k: v for k, v in json_state.items() if k != '#meta'}  # type: ignore
 
-            operation = {
-                'transition_id': transition_id,
-                'timestamp': time.time(),
-                'trace': trace,
-                # Actual implementation would include:
-                # 'command': {...},
-                # 'response': {...},
-            }
+                self.log.info(f"Current state index: {state_index}")
 
-            return operation
+                # state_values should be a dictionary
+                if not isinstance(state_values, dict):
+                    self.log.error(f"Unexpected state values type: {type(state_values)}, value: {state_values}")
+                    return None
+
+                self.log.info(f"Current state keys: {state_values.keys()}")
+
+                # Extract lastAction from the state
+                last_action = state_values.get('lastAction')
+                if last_action is None:
+                    self.log.warning("No lastAction in current state")
+                    return None
+
+                # For manual JSON, lastAction is a dict with 'tag' and 'value'
+                # For itf-py, it would be a namedtuple, but we're using manual JSON for now
+                if isinstance(last_action, dict):
+                    action_tag = last_action.get('tag', 'Unknown')
+                    action_value = last_action.get('value', {})
+                else:
+                    # itf-py decoded variant
+                    action_tag = last_action.tag
+                    action_value = last_action.value
+
+                self.log.info(f"lastAction tag: {action_tag}")
+                self.log.info(f"lastAction value type: {type(action_value)}")
+
+                # Determine the TFTP operation based on the action tag
+                operation = {
+                    'transition_id': transition_id,
+                    'timestamp': time.time(),
+                    'action_tag': action_tag,
+                    'action_value': action_value,
+                }
+
+                # Parse the action to determine what TFTP command to send
+                if action_tag == 'ActionInit':
+                    self.log.info("Action: Initialization")
+                    operation['command'] = 'init'
+
+                elif action_tag == 'ActionClientSendRRQ':
+                    self.log.info("Action: Client sends RRQ")
+                    # action_value should be a dict with 'sent' key
+                    sent_packet = action_value.get('sent') if isinstance(action_value, dict) else action_value.sent
+                    operation['command'] = 'send_rrq'
+                    operation['packet'] = sent_packet
+                    # TODO: Send RRQ command to Docker client
+
+                elif action_tag == 'ActionRecvSend':
+                    # action_value should have 'rcvd' and 'sent' fields
+                    rcvd_packet = action_value.get('rcvd') if isinstance(action_value, dict) else action_value.rcvd
+                    sent_packet = action_value.get('sent') if isinstance(action_value, dict) else action_value.sent
+                    self.log.info(f"Action: Receive and Send")
+                    self.log.info(f"  Received packet type: {type(rcvd_packet)}")
+                    self.log.info(f"  Sent packet type: {type(sent_packet)}")
+                    operation['command'] = 'recv_send'
+                    operation['rcvd_packet'] = rcvd_packet
+                    operation['sent_packet'] = sent_packet
+                    # TODO: Send appropriate command to Docker client based on packet types
+
+                elif action_tag == 'ActionRecvClose':
+                    rcvd_packet = action_value.get('rcvd') if isinstance(action_value, dict) else action_value.rcvd
+                    self.log.info(f"Action: Receive and Close")
+                    self.log.info(f"  Received packet type: {type(rcvd_packet)}")
+                    operation['command'] = 'recv_close'
+                    operation['rcvd_packet'] = rcvd_packet
+                    # TODO: Close the connection
+
+                elif action_tag == 'ActionClientTimeout':
+                    ip_port = action_value.get('ipPort') if isinstance(action_value, dict) else action_value.ipPort
+                    self.log.info(f"Action: Client Timeout on {ip_port}")
+                    operation['command'] = 'client_timeout'
+                    operation['ip_port'] = ip_port
+                    # TODO: Handle client timeout
+
+                elif action_tag == 'ActionServerTimeout':
+                    ip_port = action_value.get('ipPort') if isinstance(action_value, dict) else action_value.ipPort
+                    self.log.info(f"Action: Server Timeout on {ip_port}")
+                    operation['command'] = 'server_timeout'
+                    operation['ip_port'] = ip_port
+                    # TODO: Handle server timeout
+
+                elif action_tag == 'ActionAdvanceClock':
+                    delta = action_value.get('delta') if isinstance(action_value, dict) else action_value.delta
+                    self.log.info(f"Action: Advance Clock by {delta}")
+                    operation['command'] = 'advance_clock'
+                    operation['delta'] = delta
+                    # TODO: Sleep or advance time in the test environment
+
+                else:
+                    self.log.warning(f"Unknown action tag: {action_tag}")
+                    operation['command'] = 'unknown'
+
+                return operation
+            else:
+                self.log.warning("Empty trace received")
+                return None
 
         except Exception as e:
             self.log.error(f"Error querying transition details: {e}", exc_info=True)
