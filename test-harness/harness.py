@@ -30,6 +30,7 @@ from client import (
     TransitionEnabled,
     TransitionDisabled,
 )
+from docker_manager import DockerManager
 from server import ApalacheServer
 
 
@@ -59,6 +60,9 @@ class TftpTestHarness:
         # Apalache server and client
         self.server = None
         self.client = None
+
+        # Docker manager
+        self.docker = None
 
         # Specification parameters
         self.spec_params = None
@@ -102,6 +106,27 @@ class TftpTestHarness:
         if self.server:
             self.log.info("Stopping Apalache server...")
             self.server.stop_server()
+
+    def setup_docker(self) -> bool:
+        """Set up the Docker environment for TFTP testing."""
+        self.log.info("Setting up Docker environment...")
+
+        # Initialize Docker manager
+        self.docker = DockerManager(str(self.spec_dir.parent / "test-harness"))
+
+        # Set up Docker (build image, create network, start containers)
+        if not self.docker.setup():
+            self.log.error("Failed to set up Docker environment")
+            return False
+
+        self.log.info("Docker environment ready")
+        return True
+
+    def cleanup_docker(self):
+        """Clean up Docker resources."""
+        if self.docker:
+            self.log.info("Cleaning up Docker environment...")
+            self.docker.cleanup()
 
     def load_specification(self, solver_timeout: int = 300):
         """Load the TFTP specification into Apalache."""
@@ -258,7 +283,42 @@ class TftpTestHarness:
                     sent_packet = last_action.sent
                     operation['command'] = 'send_rrq'
                     operation['packet'] = sent_packet
-                    # TODO: Send RRQ command to Docker client
+
+                    # Send RRQ command to Docker client
+                    if self.docker:
+                        # Extract packet details (itf-py decoded namedtuples)
+                        src_ip = sent_packet.srcIp
+                        src_port = sent_packet.srcPort
+                        dest_ip = sent_packet.destIp
+                        dest_port = sent_packet.destPort
+                        payload = sent_packet.payload
+
+                        # Extract RRQ details from payload
+                        # payload is a namedtuple for RRQ variant
+                        payload_data = payload.value if hasattr(payload, 'value') else payload
+                        filename = payload_data.filename
+                        mode = payload_data.mode
+                        options = payload_data.options if hasattr(payload_data, 'options') else {}
+
+                        # Build command for Docker client
+                        command = {
+                            'action': 'send_rrq',
+                            'src_ip': src_ip,
+                            'src_port': src_port,
+                            'dest_ip': dest_ip,
+                            'dest_port': dest_port,
+                            'filename': filename,
+                            'mode': mode,
+                            'options': dict(options) if hasattr(options, 'items') else {}
+                        }
+
+                        response = self.docker.send_command_to_client(src_ip, command)
+                        if response:
+                            operation['response'] = response
+                        else:
+                            self.log.warning("No response from Docker client")
+                    else:
+                        self.log.warning("Docker manager not initialized, skipping actual TFTP operation")
 
                 elif action_tag == 'ActionRecvSend':
                     rcvd_packet = last_action.rcvd
@@ -452,13 +512,14 @@ class TftpTestHarness:
 
         return True
 
-    def run(self, num_tests: int = 1, max_steps: int = 20):
+    def run(self, num_tests: int = 1, max_steps: int = 20, use_docker: bool = False):
         """
         Main entry point for the test harness.
 
         Args:
             num_tests: Number of test runs to generate
             max_steps: Maximum steps per test run
+            use_docker: Whether to use Docker for actual TFTP operations
         """
         try:
             # Start Apalache server
@@ -470,6 +531,12 @@ class TftpTestHarness:
             if not self.load_specification():
                 self.log.error("Failed to load specification")
                 return False
+
+            # Optionally set up Docker
+            if use_docker:
+                if not self.setup_docker():
+                    self.log.error("Failed to set up Docker")
+                    return False
 
             # Generate test runs
             for i in range(num_tests):
@@ -497,6 +564,9 @@ class TftpTestHarness:
 
         finally:
             # Cleanup
+            if use_docker:
+                self.cleanup_docker()
+
             if self.client:
                 self.client.dispose_spec()
                 self.client.close()
@@ -506,6 +576,18 @@ class TftpTestHarness:
 
 def main():
     """Main entry point."""
+    import argparse
+
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='TFTP Test Harness - Symbolic Testing')
+    parser.add_argument('--docker', action='store_true',
+                        help='Enable Docker for actual TFTP operations')
+    parser.add_argument('--tests', type=int, default=3,
+                        help='Number of test runs to generate (default: 3)')
+    parser.add_argument('--steps', type=int, default=10,
+                        help='Maximum steps per test run (default: 10)')
+    args = parser.parse_args()
+
     # Configuration
     script_dir = Path(__file__).parent
     spec_dir = script_dir.parent / "spec"
@@ -520,7 +602,7 @@ def main():
     )
 
     # Generate test runs
-    success = harness.run(num_tests=3, max_steps=10)
+    success = harness.run(num_tests=args.tests, max_steps=args.steps, use_docker=args.docker)
 
     sys.exit(0 if success else 1)
 

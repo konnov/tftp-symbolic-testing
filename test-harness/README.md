@@ -24,8 +24,8 @@ This test harness generates test cases for TFTP protocol implementations by:
 ### Network Configuration
 
 As specified in `MC2_tftp.tla`:
-- **Server IP**: 10.0.0.1
-- **Client IPs**: 10.0.0.2, 10.0.0.3
+- **Server IP**: 172.20.0.10
+- **Client IPs**: 172.20.0.11, 172.20.0.12
 - **TFTP Control Port**: 69
 - **TFTP Data Ports**: 1024-1027
 - **Client Control Port**: 5000 (TCP, for receiving commands from harness)
@@ -134,7 +134,7 @@ For each test run:
 ### Docker Integration
 
 The harness manages:
-- **TFTP Server**: tftp-hpa running in Docker at 10.0.0.1
+- **TFTP Server**: tftp-hpa running in Docker at 172.20.0.10
 - **TFTP Clients**: Python scripts listening on TCP port 5000
 - **Communication**: Harness sends commands via TCP, clients execute TFTP ops via UDP
 

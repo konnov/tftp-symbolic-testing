@@ -6,8 +6,8 @@
  *)
 EXTENDS Integers, Apalache
 
-SERVER_IP == "10.0.0.1"
-CLIENT_IPS == {"10.0.0.2", "10.0.0.3"}
+SERVER_IP == "172.20.0.10"
+CLIENT_IPS == {"172.20.0.11", "172.20.0.12"}
 PORTS == 1024..1027
 FILES == SetAsFun({
     <<"file1", 1024>>,

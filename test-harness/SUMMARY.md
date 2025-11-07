@@ -40,7 +40,7 @@ All 12 requirements from `prompt-test-harness.md` have been addressed:
 - ✅ **Requirement 4**: ITF format support via itf-py
 - ✅ **Requirement 5**: tftp-hpa as system under test
 - ✅ **Requirement 6**: Docker with port ranges (69, 1024-1027)
-- ✅ **Requirement 7**: IP addresses from MC2_tftp.tla (10.0.0.1-3)
+- ✅ **Requirement 7**: IP addresses from MC2_tftp.tla (172.20.0.10-12)
 - ✅ **Requirement 8**: TCP control port for clients (5000)
 - ✅ **Requirement 9**: Harness C&C from host machine
 - ✅ **Requirement 10**: Test files with correct sizes
@@ -63,21 +63,21 @@ All 12 requirements from `prompt-test-harness.md` have been addressed:
 │           ▼                        ▼                        │
 │  ┌─────────────────┐     ┌──────────────────────────┐     │
 │  │ Apalache Server │     │  Docker Manager          │     │
-│  │  (port 8822)    │     │  - Network: 10.0.0.0/24 │     │
+│  │  (port 8822)    │     │  - Network: 172.20.0.0/24 │     │
 │  └─────────────────┘     └──────────┬───────────────┘     │
 │                                      │                      │
 └──────────────────────────────────────┼──────────────────────┘
                                        │
                          ┌─────────────┴─────────────┐
                          │   Docker Network          │
-                         │   (10.0.0.0/24)          │
+                         │   (172.20.0.0/24)         │
                          │                           │
          ┌───────────────┼───────────────────────────┼─────────────┐
          │               │                           │             │
          ▼               ▼                           ▼             │
   ┌─────────────┐ ┌─────────────┐          ┌─────────────┐       │
   │ TFTP Server │ │  Client 1   │          │  Client 2   │       │
-  │  10.0.0.1   │ │  10.0.0.2   │          │  10.0.0.3   │       │
+  │ 172.20.0.10 │ │ 172.20.0.11 │          │ 172.20.0.12 │       │
   │             │ │             │          │             │       │
   │ tftp-hpa    │ │ Python      │          │ Python      │       │
   │ Port: 69    │ │ TCP: 5001   │          │ TCP: 5002   │       │

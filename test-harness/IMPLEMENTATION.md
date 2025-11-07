@@ -28,9 +28,9 @@ A complete test harness has been generated for symbolic testing of the TFTP prot
 ### Docker Integration
 
 4. **`docker_manager.py`** - Docker orchestration
-   - Creates Docker network with subnet 10.0.0.0/24
-   - Manages TFTP server container (IP: 10.0.0.1)
-   - Manages client containers (IPs: 10.0.0.2, 10.0.0.3)
+   - Creates Docker network with subnet 172.20.0.0/24
+   - Manages TFTP server container (IP: 172.20.0.10)
+   - Manages client containers (IPs: 172.20.0.11, 172.20.0.12)
    - Handles port exposure (69, 1024-1027, 5000)
    - Sends commands to clients via TCP control port
 
@@ -122,8 +122,8 @@ A complete test harness has been generated for symbolic testing of the TFTP prot
 - Port 69 and data ports exposed to host
 
 ### ✅ Requirement 7: IP Address Configuration
-- SERVER_IP: 10.0.0.1 (from MC2_tftp.tla)
-- CLIENT_IPS: 10.0.0.2, 10.0.0.3 (from MC2_tftp.tla)
+- SERVER_IP: 172.20.0.10 (from MC2_tftp.tla)
+- CLIENT_IPS: 172.20.0.11, 172.20.0.12 (from MC2_tftp.tla)
 - Docker network configured with these IPs
 
 ### ✅ Requirement 8: Client Command & Control

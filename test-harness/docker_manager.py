@@ -21,8 +21,8 @@ class DockerManager:
     """Manages Docker containers for TFTP testing."""
 
     # Constants from MC2_tftp.tla
-    SERVER_IP = "10.0.0.1"
-    CLIENT_IPS = ["10.0.0.2", "10.0.0.3"]
+    SERVER_IP = "172.20.0.10"
+    CLIENT_IPS = ["172.20.0.11", "172.20.0.12"]
     PORT_RANGE = "1024:1027"
     CONTROL_PORT = 5000
 
@@ -78,7 +78,7 @@ class DockerManager:
 
             # Create the network
             subprocess.run(
-                ["docker", "network", "create", "--subnet=10.0.0.0/24", self.network_name],
+                ["docker", "network", "create", "--subnet=172.20.0.0/24", self.network_name],
                 check=True,
                 capture_output=True,
                 text=True

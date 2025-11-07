@@ -11,14 +11,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create TFTP root directory
-RUN mkdir -p /var/tftpboot
+RUN mkdir -p /var/tftp
 
 # Copy test files
-COPY files/ /var/tftpboot/
+COPY files/ /var/tftp
 
 # Set permissions
-RUN chmod -R 755 /var/tftpboot && \
-    chown -R nobody:nogroup /var/tftpboot
+RUN chmod -R 755 /var/tftp && \
+    chown -R nobody:nogroup /var/tftp
 
 # Copy the TFTP client script
 COPY tftp_client_docker.py /usr/local/bin/tftp_client.py
@@ -28,14 +28,13 @@ RUN chmod +x /usr/local/bin/tftp_client.py
 # Port 69 is the TFTP control port
 # Ports 1024-1027 are the data transfer ports (as per MC2_tftp.tla)
 # Port 5000 is the TCP control port for the client
-EXPOSE 69 1024-1027 5000
+#EXPOSE 69 1024-1027 5000
 
 # Create startup script
 RUN echo '#!/bin/bash\n\
 set -e\n\
 \n\
-# Configure IP addresses\n\
-ip addr add ${SERVER_IP}/24 dev eth0 || true\n\
+# Docker Compose already assigns the IP via ipv4_address, no manual configuration needed\n\
 \n\
 # Start TFTP server in background\n\
 in.tftpd -L --foreground --address ${SERVER_IP}:69 \\\n\
