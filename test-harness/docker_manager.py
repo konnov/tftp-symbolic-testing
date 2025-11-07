@@ -24,7 +24,7 @@ class DockerManager:
     SERVER_IP = "172.20.0.10"
     CLIENT_IPS = ["172.20.0.11", "172.20.0.12"]
     PORT_RANGE = "1024:1027"
-    CONTROL_PORT = 5000
+    CONTROL_PORT = 15000  # Changed from 5000 to avoid conflict with macOS ControlCenter
 
     def __init__(self, test_harness_dir: str):
         """
@@ -140,11 +140,15 @@ class DockerManager:
             # Container name based on IP
             container_name = f"tftp-client-{client_ip.replace('.', '-')}"
 
+            # Calculate unique host port for each client (15001, 15002, etc.)
+            client_index = self.CLIENT_IPS.index(client_ip)
+            host_port = self.CONTROL_PORT + client_index + 1
+
             # Stop and remove existing container if it exists
             subprocess.run(
                 ["docker", "rm", "-f", container_name],
                 capture_output=True,
-                stderr=subprocess.DEVNULL
+                text=True
             )
 
             # Start the client container
@@ -155,7 +159,7 @@ class DockerManager:
                 "--ip", client_ip,
                 "-e", f"CLIENT_IP={client_ip}",
                 "-e", f"SERVER_IP={self.SERVER_IP}",
-                "-p", f"{self.CONTROL_PORT}:{self.CONTROL_PORT}",
+                "-p", f"{host_port}:{self.CONTROL_PORT}",  # Map unique host port to container's CONTROL_PORT
                 self.image_name,
                 "python3", "/usr/local/bin/tftp_client.py",
                 "--client-ip", client_ip,
@@ -191,10 +195,14 @@ class DockerManager:
         self.log.info(f"Sending command to client {client_ip}: {command}")
 
         try:
+            # Calculate the host port for this client
+            client_index = self.CLIENT_IPS.index(client_ip)
+            host_port = self.CONTROL_PORT + client_index + 1
+
             # Connect to client control port
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(10)
-            sock.connect(("localhost", self.CONTROL_PORT))
+            sock.connect(("localhost", host_port))
 
             # Send command (length-prefixed JSON)
             cmd_data = json.dumps(command).encode('utf-8')
@@ -225,7 +233,7 @@ class DockerManager:
             subprocess.run(
                 ["docker", "rm", "-f", "tftp-server"],
                 capture_output=True,
-                stderr=subprocess.DEVNULL
+                text=True
             )
             self.log.info("TFTP server stopped")
         except Exception as e:
@@ -238,7 +246,7 @@ class DockerManager:
                 subprocess.run(
                     ["docker", "rm", "-f", container_id],
                     capture_output=True,
-                    stderr=subprocess.DEVNULL
+                    text=True
                 )
             except Exception as e:
                 self.log.warning(f"Error stopping client {container_id[:12]}: {e}")
@@ -257,7 +265,7 @@ class DockerManager:
             subprocess.run(
                 ["docker", "network", "rm", self.network_name],
                 capture_output=True,
-                stderr=subprocess.DEVNULL
+                text=True
             )
             self.log.info(f"Network {self.network_name} removed")
         except Exception as e:
