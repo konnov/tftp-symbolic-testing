@@ -4,7 +4,7 @@
 
  Igor Konnov, 2025
  *)
-EXTENDS Apalache
+EXTENDS Integers, Apalache
 
 SERVER_IP == "10.0.0.1"
 CLIENT_IPS == {"10.0.0.2", "10.0.0.3"}

@@ -114,10 +114,10 @@ class TftpTestHarness:
 
         # Specification files
         spec_files = [
+            str(self.spec_dir / "MC2_tftp.tla"),
             str(self.spec_dir / "typedefs.tla"),
             str(self.spec_dir / "util.tla"),
             str(self.spec_dir / "tftp.tla"),
-            str(self.spec_dir / "MC2_tftp.tla"),
         ]
 
         # Load the specification
@@ -140,9 +140,25 @@ class TftpTestHarness:
 
         return True
 
-    def select_random_transition(self, transitions: List[int]) -> int:
-        """Randomly select a transition from the available transitions."""
-        return random.choice(transitions)
+    def select_random_transition(self, transitions: List[Any]) -> int:
+        """
+        Randomly select a transition from the available transitions.
+
+        Args:
+            transitions: List of transition objects with 'index' and 'labels'
+
+        Returns:
+            The index of the selected transition
+        """
+        transition = random.choice(transitions)
+        # Transitions are objects like {'index': 0, 'labels': [...]}
+        if isinstance(transition, dict) and 'index' in transition:
+            return int(transition['index'])
+        # Fallback if it's already an integer
+        if isinstance(transition, int):
+            return transition
+        # Should not happen, but raise an error if it does
+        raise ValueError(f"Unexpected transition format: {transition}")
 
     def try_transition(self, transition_id: int) -> bool:
         """
