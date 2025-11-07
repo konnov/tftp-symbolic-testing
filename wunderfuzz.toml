@@ -1,0 +1,107 @@
+# Wunderfuzz Configuration
+
+[fuzzer]
+# List of TLA+ source files (absolute paths, ${config_path} supported)
+sources = [
+    '${config_path}/spec/MC2_tftp.tla',
+    '${config_path}/spec/util.tla',
+    '${config_path}/spec/typedefs.tla',
+    '${config_path}/spec/tftp.tla'
+]
+
+# Warmup phase parameters
+
+# minimum number of steps in warm-up
+warmup_min_steps = 10
+# percent of max_steps
+warmup_len_factor = 25
+# maximum number of paths to reach in warm-up
+warmup_max_paths = 10
+# maximum number of executions in warm-up
+warmup_max_exec = 100
+
+# Decay parameters
+# default temperature for decay-based strategies
+decay_temperature = 1.0
+# number of cycles for temperature decay
+decay_cycle = 5
+# temperature decay factor per cycle
+decay_beta = 0.95
+# minimum score threshold
+min_score = 10
+
+# Strategy parameters
+# extend by max `extend_len_factor // 100` steps
+extend_len_factor = 50
+# limit the number of views to avoid explosion
+max_views = 3
+# limit the number of transition duplications
+max_dup = 2
+# number of tries to trim a path
+trim_tries = 2
+# number of tries to flip a path
+flip_tries = 2
+
+# Cycle parameters
+# minimum number of elements before switching to next cycle
+cycle_min = 100
+# maximum number of elements before switching to next cycle
+cycle_max = 200
+# the ratio of entries to fuzz per generation, e.g., 0.1 = 10%
+cycle_generation_ratio = 0.1
+# the ratio of new paths before switching to next cycle, e.g., 2.0 = 200%
+cycle_new_path_ratio = 2.0
+
+# Extra output, may occupy plenty of disk space
+# dump all views to disk
+save_views = 1
+# dump all traces to disk
+save_traces = 1
+
+# Resource adaptation parameters
+# yield worker if load_avg_1m / cpu_count > this percent
+worker_yield_cpu_percent = 101
+# yield worker if sys_mem_pct > this percent
+worker_yield_mem_percent = 90
+# if we are over memory limit, try to GC every gc_period_sec seconds
+gc_period_sec = 600
+# period to check memory danger zone
+mem_danger_zone_restart_after_sec = 600
+# memory percentage threshold for danger zone
+mem_danger_zone_percent = 95
+# size of the server pool
+server_pool_size = 1
+
+# CLI argument defaults (can be overridden by command line)
+# Initial predicate
+init = "Init"
+# Next-state predicate
+next = "Next"
+# Invariant to check
+invariant = "TrueInv"
+# View to collect coverage
+view = "MeasureAndPacketsView"
+# Measure to use
+fitness = "measure"
+# probability for tournament selection
+tournament_probability = 0.9
+# Maximum steps to explore per run
+max_steps = 30
+# Timeout in seconds per single SMT call
+timeout = 60
+# Random seed for reproducible exploration
+# seed = 123
+# The output directory for the corpus
+corpus_path = "corpus"
+# Number of worker threads
+workers = 4
+
+# Additional runtime settings (not typically configured)
+# Apalache server hostname, managed if set to 'localhost'
+hostname = "localhost"
+# Apalache server port
+port = 8822
+# Halt after N crashes detected
+# halt = 1
+# Disable UI (to run in headless mode)
+no_ux = 0
