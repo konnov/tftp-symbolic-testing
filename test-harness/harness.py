@@ -282,15 +282,13 @@ class TftpTestHarness:
                         options = payload_data.options if hasattr(payload_data, 'options') else {}
 
                         # Build command for Docker client
+                        # Note: client expects 'type': 'rrq', not 'action': 'send_rrq'
                         command = {
-                            'action': 'send_rrq',
-                            'src_ip': src_ip,
-                            'src_port': src_port,
-                            'dest_ip': dest_ip,
-                            'dest_port': dest_port,
+                            'type': 'rrq',
                             'filename': filename,
                             'mode': mode,
-                            'options': dict(options) if hasattr(options, 'items') else {}
+                            'options': dict(options) if hasattr(options, 'items') else {},
+                            'source_port': src_port  # Optional: client can use specific source port
                         }
 
                         response = self.docker.send_command_to_client(src_ip, command)
