@@ -23,6 +23,7 @@ services:
     environment:
       - CLIENT_IP=172.20.0.11
       - SERVER_IP=172.20.0.10
+      - CONTROL_PORT=15000
     ports:
       - "15001:15000"
     command: python3 /usr/local/bin/tftp_client.py --client-ip 172.20.0.11 --server-ip 172.20.0.10 --control-port 15000
@@ -38,6 +39,7 @@ services:
     environment:
       - CLIENT_IP=172.20.0.12
       - SERVER_IP=172.20.0.10
+      - CONTROL_PORT=15000
     ports:
       - "15002:15000"
     command: python3 /usr/local/bin/tftp_client.py --client-ip 172.20.0.12 --server-ip 172.20.0.10 --control-port 15000

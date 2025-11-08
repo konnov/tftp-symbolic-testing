@@ -159,6 +159,7 @@ class DockerManager:
                 "--ip", client_ip,
                 "-e", f"CLIENT_IP={client_ip}",
                 "-e", f"SERVER_IP={self.SERVER_IP}",
+                "-e", f"CONTROL_PORT={self.CONTROL_PORT}",
                 "-p", f"{host_port}:{self.CONTROL_PORT}",  # Map unique host port to container's CONTROL_PORT
                 self.image_name,
                 "python3", "/usr/local/bin/tftp_client.py",

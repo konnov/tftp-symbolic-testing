@@ -39,18 +39,18 @@ set -e\n\
 # Start TFTP server in background\n\
 in.tftpd -L --foreground --address ${SERVER_IP}:69 \\\n\
   --user nobody --port-range ${PORT_RANGE} \\\n\
-  --secure /var/tftpboot &\n\
+  --secure /var/tftp &\n\
 \n\
 TFTPD_PID=$!\n\
 echo "TFTP server started with PID $TFTPD_PID"\n\
 \n\
 # Start client control server if CLIENT_IP is set\n\
 if [ -n "${CLIENT_IP}" ]; then\n\
-  echo "Starting TFTP client control server on ${CLIENT_IP}:5000"\n\
+  echo "Starting TFTP client control server on ${CLIENT_IP}:${CONTROL_PORT:-15000}"\n\
   python3 /usr/local/bin/tftp_client.py \\\n\
     --client-ip ${CLIENT_IP} \\\n\
     --server-ip ${SERVER_IP} \\\n\
-    --control-port 5000 &\n\
+    --control-port ${CONTROL_PORT:-15000} &\n\
   CLIENT_PID=$!\n\
   echo "Client started with PID $CLIENT_PID"\n\
 fi\n\
