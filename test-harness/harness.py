@@ -12,6 +12,7 @@ This script:
 Claude Sonnet 4.5 and Igor Konnov, 2025
 """
 
+from copy import deepcopy
 import json
 import logging
 import os
@@ -166,26 +167,6 @@ class TftpTestHarness:
         self.log.info(f"Next transitions: {len(self.spec_params['next'])}")
 
         return True
-
-    def select_random_transition(self, transitions: List[Any]) -> int:
-        """
-        Randomly select a transition from the available transitions.
-
-        Args:
-            transitions: List of transition objects with 'index' and 'labels'
-
-        Returns:
-            The index of the selected transition
-        """
-        transition = random.choice(transitions)
-        # Transitions are objects like {'index': 0, 'labels': [...]}
-        if isinstance(transition, dict) and 'index' in transition:
-            return int(transition['index'])
-        # Fallback if it's already an integer
-        if isinstance(transition, int):
-            return transition
-        # Should not happen, but raise an error if it does
-        raise ValueError(f"Unexpected transition format: {transition}")
 
     def try_transition(self, transition_id: int) -> bool:
         """
@@ -452,10 +433,10 @@ class TftpTestHarness:
             self.log.error("No init transitions available")
             return False
 
-        init_trans = self.select_random_transition(init_transitions)
+        init_trans = random.choice(init_transitions)
         self.log.info(f"Selected init transition: {init_trans}")
 
-        if not self.try_transition(init_trans):
+        if not self.try_transition(init_trans["index"]):
             self.log.error("Init transition is not enabled")
             return False
 
@@ -473,22 +454,22 @@ class TftpTestHarness:
             enabled_found = False
 
             # Try to find an enabled transition
-            transitions_to_try = list(next_transitions)  # Copy to avoid modifying original
+            transitions_to_try = deepcopy(next_transitions)
             for _ in range(max_retries):
                 # Select a random next transition from the transitions we have not tried yet
-                next_trans = self.select_random_transition(transitions_to_try)
+                next_trans = random.choice(transitions_to_try)
                 transitions_to_try.remove(next_trans)
 
                 # Save current snapshot before trying
                 snapshot_before = self.current_snapshot
 
                 # Try the transition
-                if self.try_transition(next_trans):
+                if self.try_transition(next_trans["index"]):
                     enabled_found = True
                     self.current_transitions.append(next_trans)
 
                     # Execute the corresponding TFTP operation
-                    operation = self.execute_tftp_operation(next_trans)
+                    operation = self.execute_tftp_operation(next_trans["index"])
                     if operation:
                         self.current_commands.append(operation)
 
