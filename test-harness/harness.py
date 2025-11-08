@@ -409,7 +409,7 @@ class TftpTestHarness:
         self.current_transitions = []
         self.current_commands = []
 
-    def generate_test_run(self, max_steps: int = 20, max_retries: int = 10) -> bool:
+    def generate_test_run(self, max_steps: int = 20) -> bool:
         """
         Generate a single test run by exploring symbolic execution.
 
@@ -455,7 +455,7 @@ class TftpTestHarness:
 
             # Try to find an enabled transition
             transitions_to_try = deepcopy(next_transitions)
-            for _ in range(max_retries):
+            while len(transitions_to_try) > 0 and not enabled_found:
                 # Select a random next transition from the transitions we have not tried yet
                 next_trans = random.choice(transitions_to_try)
                 transitions_to_try.remove(next_trans)

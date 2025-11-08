@@ -192,12 +192,13 @@ class DockerManager:
         Returns:
             Response dictionary or None on error
         """
-        self.log.info(f"Sending command to client {client_ip}: {command}")
-
+        
         try:
             # Calculate the host port for this client
             client_index = self.CLIENT_IPS.index(client_ip)
             host_port = self.CONTROL_PORT + client_index + 1
+
+            self.log.info(f"Sending command to client {client_ip} over {host_port}: {command}")
 
             # Connect to client control port
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
