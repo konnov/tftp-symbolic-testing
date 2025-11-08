@@ -24,8 +24,8 @@ services:
       - CLIENT_IP=172.20.0.11
       - SERVER_IP=172.20.0.10
     ports:
-      - "5001:5000"
-    command: python3 /usr/local/bin/tftp_client.py --client-ip 172.20.0.11 --server-ip 172.20.0.10 --control-port 5000
+      - "15001:15000"
+    command: python3 /usr/local/bin/tftp_client.py --client-ip 172.20.0.11 --server-ip 172.20.0.10 --control-port 15000
     depends_on:
       - tftp-server
 
@@ -39,8 +39,8 @@ services:
       - CLIENT_IP=172.20.0.12
       - SERVER_IP=172.20.0.10
     ports:
-      - "5002:5000"
-    command: python3 /usr/local/bin/tftp_client.py --client-ip 172.20.0.12 --server-ip 172.20.0.10 --control-port 5000
+      - "15002:15000"
+    command: python3 /usr/local/bin/tftp_client.py --client-ip 172.20.0.12 --server-ip 172.20.0.10 --control-port 15000
     depends_on:
       - tftp-server
 
