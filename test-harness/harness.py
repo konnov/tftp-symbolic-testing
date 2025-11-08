@@ -129,6 +129,72 @@ class TftpTestHarness:
             self.log.info("Cleaning up Docker environment...")
             self.docker.cleanup()
 
+    def _construct_expected_packet(self, response: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Construct an expected packet structure from Docker client response
+        that matches the TLA+ specification format.
+
+        Args:
+            response: Response from Docker client containing packet details
+
+        Returns:
+            Expected packet dictionary in TLA+ format
+        """
+        # Extract packet details from response
+        opcode = response.get('opcode')
+        src_ip = response.get('src_ip')
+        src_port = response.get('src_port')
+        dest_ip = response.get('dest_ip')
+        dest_port = response.get('dest_port')
+
+        # Construct base packet structure matching TLA+ $udpPacket type
+        expected = {
+            'srcIp': src_ip,
+            'srcPort': src_port,
+            'destIp': dest_ip,
+            'destPort': dest_port,
+        }
+
+        # Add payload based on opcode
+        if opcode == 6:  # OACK
+            options = response.get('options', {})
+            # Convert string values to integers where applicable
+            typed_options = {}
+            for key, value in options.items():
+                try:
+                    typed_options[key] = int(value)
+                except (ValueError, TypeError):
+                    typed_options[key] = value
+
+            expected['payload'] = {
+                'tag': 'OACK',
+                'options': typed_options
+            }
+        elif opcode == 3:  # DATA
+            block_num = response.get('block_num')
+            data_size = response.get('data_size', 0)
+            expected['payload'] = {
+                'tag': 'DATA',
+                'blockNum': block_num,
+                'dataSize': data_size
+            }
+        elif opcode == 4:  # ACK
+            block_num = response.get('block_num')
+            expected['payload'] = {
+                'tag': 'ACK',
+                'blockNum': block_num
+            }
+        elif opcode == 5:  # ERROR
+            error_code = response.get('error_code')
+            error_msg = response.get('error_msg', '')
+            expected['payload'] = {
+                'tag': 'ERROR',
+                'errorCode': error_code,
+                'errorMsg': error_msg
+            }
+
+        return expected
+
     def load_specification(self, solver_timeout: int = 300):
         """Load the TFTP specification into Apalache."""
         self.log.info("Loading TFTP specification...")
@@ -294,6 +360,12 @@ class TftpTestHarness:
                         response = self.docker.send_command_to_client(src_ip, command)
                         if response:
                             operation['response'] = response
+
+                            # Decode response and construct expected packet for TLA+ validation
+                            if 'opcode' in response and 'error' not in response:
+                                expected_packet = self._construct_expected_packet(response)
+                                operation['expected_packet'] = expected_packet
+                                self.log.info(f"Expected packet for validation: {expected_packet}")
                         else:
                             self.log.warning("No response from Docker client")
                     else:
@@ -487,7 +559,7 @@ class TftpTestHarness:
                         self.current_snapshot = snapshot_before
 
             if not enabled_found:
-                self.log.warning(f"Could not find enabled transition after {max_retries} retries")
+                self.log.warning(f"Could not find enabled transition")
                 break
 
         # Save the test run
