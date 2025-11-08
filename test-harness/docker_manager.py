@@ -4,7 +4,7 @@ Docker orchestration for TFTP test harness.
 
 Manages Docker containers, networks, and communication with TFTP clients.
 
-Igor Konnov, 2025
+Claude Sonnet 4.5 and Igor Konnov, 2025
 """
 
 import json

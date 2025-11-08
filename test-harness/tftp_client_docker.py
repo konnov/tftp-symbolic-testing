@@ -7,7 +7,7 @@ This client script runs inside a Docker container and:
 2. Executes TFTP operations (read/write) based on commands
 3. Sends responses back over the TCP connection
 
-Igor Konnov, 2025
+Claude Sonnet 4.5 and Igor Konnov, 2025
 """
 
 import json
@@ -246,6 +246,7 @@ class TftpClient:
         self.log.info(f"Sending ACK for block {block_num}")
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # TODO: use the negotiated timeout if available
         sock.settimeout(DEFAULT_TIMEOUT)
 
         try:

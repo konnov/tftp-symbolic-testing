@@ -9,7 +9,7 @@ This script:
 4. Controls Docker containers running the TFTP server and clients
 5. Executes TFTP operations and validates against the specification
 
-Igor Konnov, 2025
+Claude Sonnet 4.5 and Igor Konnov, 2025
 """
 
 import json
@@ -445,6 +445,8 @@ class TftpTestHarness:
         self.log.info(f"=== Starting test run generation (max {max_steps} steps) ===")
 
         # Initialize with a random init transition
+        # TODO: In this case, there is only one init transition,
+        # in other projects there may be more
         init_transitions = self.spec_params['init']
         if not init_transitions:
             self.log.error("No init transitions available")
@@ -471,9 +473,11 @@ class TftpTestHarness:
             enabled_found = False
 
             # Try to find an enabled transition
-            for retry in range(max_retries):
-                # Select a random next transition
-                next_trans = self.select_random_transition(next_transitions)
+            transitions_to_try = list(next_transitions)  # Copy to avoid modifying original
+            for _ in range(max_retries):
+                # Select a random next transition from the transitions we have not tried yet
+                next_trans = self.select_random_transition(transitions_to_try)
+                transitions_to_try.remove(next_trans)
 
                 # Save current snapshot before trying
                 snapshot_before = self.current_snapshot

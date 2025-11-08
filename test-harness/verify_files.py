@@ -2,7 +2,7 @@
 """
 Verify that test files match the sizes specified in MC2_tftp.tla.
 
-Igor Konnov, 2025
+Claude Sonnet 4.5, 2025
 """
 
 import sys
