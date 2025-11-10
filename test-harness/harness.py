@@ -14,6 +14,7 @@ Claude Sonnet 4.5 and Igor Konnov, 2025
 
 from collections import namedtuple
 from copy import deepcopy
+from dataclasses import dataclass
 import json
 import logging
 import os
@@ -34,6 +35,47 @@ from client import (
 )
 from docker_manager import DockerManager
 from server import ApalacheServer
+
+
+# Variant type dataclasses for TLA+ types
+# Class names must match variant tags exactly (required by itf-py)
+
+@dataclass
+class OACK:
+    """TFTP OACK (Option Acknowledgment) packet variant."""
+    opcode: int
+    options: Dict[str, int]
+
+
+@dataclass
+class DATA:
+    """TFTP DATA packet variant."""
+    opcode: int
+    blockNum: int
+    data: int
+
+
+@dataclass
+class ACK:
+    """TFTP ACK (Acknowledgment) packet variant."""
+    opcode: int
+    blockNum: int
+
+
+@dataclass
+class ERROR:
+    """TFTP ERROR packet variant."""
+    opcode: int
+    errorCode: int
+    errorMsg: str
+
+
+@dataclass
+class ActionRecvSend:
+    """Action representing receiving and sending packets."""
+    rcvd: Any
+    sent: Any
+
 
 # The labels of the spec actions that are controlled by the tester.
 # The other labels are controlled by the SUT (TFTP server).
@@ -160,7 +202,7 @@ class TftpTestHarness:
         dest_port = response.get('dest_port')
 
         # Add payload based on opcode
-        # Payload structure matches TLA+ Variant type: {tag: "...", value: {...}}
+        # Payload structure matches TLA+ Variant type with dataclass for value
         if opcode == 6:  # OACK
             options = response.get('options', {})
             # Convert string values to integers where applicable
@@ -171,58 +213,38 @@ class TftpTestHarness:
                 except (ValueError, TypeError):
                     typed_options[key] = value
 
-            # Create payload variant
-            oackValueType = namedtuple("OACKValue", ["opcode", "options"])
-            oackType = namedtuple("OACK", ["tag", "value"])
-            payload = oackType(
-                tag="OACK",
-                value=oackValueType(
-                    opcode=6,
-                    options=typed_options
-                )
+            # Create payload variant using module-level dataclass
+            payload = OACK(
+                opcode=6,
+                options=typed_options
             )
         elif opcode == 3:  # DATA
-            block_num = response.get('block_num')
+            block_num = response.get('block_num', 0)
             data = response.get('data', 0)  # size or actual data
 
-            # Create payload variant
-            dataValueType = namedtuple("DATAValue", ["opcode", "blockNum", "data"])
-            dataType = namedtuple("DATA", ["tag", "value"])
-            payload = dataType(
-                tag="DATA",
-                value=dataValueType(
-                    opcode=3,
-                    blockNum=block_num,
-                    data=data
-                )
+            # Create payload variant using module-level dataclass
+            payload = DATA(
+                opcode=3,
+                blockNum=block_num,
+                data=data
             )
         elif opcode == 4:  # ACK
-            block_num = response.get('block_num')
+            block_num = response.get('block_num', 0)
 
-            # Create payload variant
-            ackValueType = namedtuple("ACKValue", ["opcode", "blockNum"])
-            ackType = namedtuple("ACK", ["tag", "value"])
-            payload = ackType(
-                tag="ACK",
-                value=ackValueType(
-                    opcode=4,
-                    blockNum=block_num
-                )
+            # Create payload variant using module-level dataclass
+            payload = ACK(
+                opcode=4,
+                blockNum=block_num
             )
         elif opcode == 5:  # ERROR
-            error_code = response.get('error_code')
+            error_code = response.get('error_code', 0)
             error_msg = response.get('error_msg', '')
 
-            # Create payload variant
-            errorValueType = namedtuple("ERRORValue", ["opcode", "errorCode", "errorMsg"])
-            errorType = namedtuple("ERROR", ["tag", "value"])
-            payload = errorType(
-                tag="ERROR",
-                value=errorValueType(
-                    opcode=5,
-                    errorCode=error_code,
-                    errorMsg=error_msg
-                )
+            # Create payload variant using module-level dataclass
+            payload = ERROR(
+                opcode=5,
+                errorCode=error_code,
+                errorMsg=error_msg
             )
         else:
             payload = None
@@ -670,15 +692,10 @@ class TftpTestHarness:
                             self.log.error("No operation to validate on SUT turn")
                             return False
 
-                        # Create the value record as a namedtuple
-                        ActionRecvSendValueType = namedtuple("ActionRecvSendValue", ["rcvd", "sent"])
-                        actionRecvSendType = namedtuple("ActionRecvSend", ["tag", "value"])
-                        expected_last_action = actionRecvSendType(
-                            tag="ActionRecvSend",
-                            value=ActionRecvSendValueType(
-                                rcvd=operation['packet_to_server'],
-                                sent=operation['packet_from_server']
-                            )
+                        # Create the variant using module-level dataclass
+                        expected_last_action = ActionRecvSend(
+                            rcvd=operation['packet_to_server'],
+                            sent=operation['packet_from_server']
                         )
                         self.log.info(f"Assume lastAction: {expected_last_action}")
                         # Assume that lastAction equals the reconstructed action
