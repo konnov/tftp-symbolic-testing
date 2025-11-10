@@ -61,6 +61,7 @@ ALL_ERRORS ==
 
 \* The initial state of the TFTP system.
 Init ==
+    Init::
     /\ packets = {}
     /\ serverTransfers = [ ipPort \in {} \X {} |-> [
                 port |-> 0, blksize |-> 0, tsize |-> 0,
@@ -85,6 +86,7 @@ Init ==
 ClientSendRRQ(_srcIp, _srcPort, _filename, _options) ==
     \* We only specify the "octet" mode:
     \* "mail" mode is obsolete as per RFC 1350, what is "netascii"?
+    ClientSendRRQ::
     LET rrq == RRQ(_filename, "octet", _options)
         udp == [srcIp |-> _srcIp,
                 srcPort |-> _srcPort,
@@ -120,6 +122,7 @@ ClientSendRRQ(_srcIp, _srcPort, _filename, _options) ==
 \* @type: ({ opcode: Int, filename: Str, mode: Str, options: Str -> Int },
 \*           <<Str, Int>>, Int, $udpPacket) => Bool;
 _ServerSendDataOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
+    ServerRecvRRQthenSendData::
     \E timeout \in 1..255:
         LET dataSize == Min(512, FILES[_rrq.filename])
             dataPacket == [
@@ -155,6 +158,7 @@ _ServerSendDataOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
 \* @type: ({ opcode: Int, filename: Str, mode: Str, options: Str -> Int },
 \*           <<Str, Int>>, Int, $udpPacket) => Bool;
 _ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
+    ServerRecvRRQthenSendOack::
     \E optionsSubset \in SUBSET DOMAIN _rrq.options,
             blksize \in 0..65464, timeout \in 1..255:
         \* RFC 2349, Section 3.1: "If the server is willing to accept
@@ -196,6 +200,7 @@ _ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
 \* @type: ({ opcode: Int, filename: Str, mode: Str, options: Str -> Int },
 \*           <<Str, Int>>, $udpPacket) => Bool;
 _ServerSendErrorOnRrq(_rrq, _clientIpAndPort, _rcvdPacket) ==
+    ServerRecvRRQthenSendError::
     \E errorCode \in DOMAIN ALL_ERRORS:
         LET errorPacket == [
                 srcIp |-> SERVER_IP, srcPort |-> 69,
@@ -235,6 +240,7 @@ ServerRecvRRQ(_udp) ==
 \* or rejects the options and sends ERROR.
 \* @type: $udpPacket => Bool;
 ClientRecvOACK(_udp) ==
+    ClientRecvOACK::
     LET ipPort == <<_udp.destIp, _udp.destPort>> IN
     /\  IsOACK(_udp.payload)
     /\  _udp.srcIp = SERVER_IP
@@ -299,6 +305,7 @@ ClientRecvOACK(_udp) ==
 \* A client receives a DATA packet from the server (RRQ transfer).
 \* @type: $udpPacket => Bool;
 ClientRecvDATA(_udp) ==
+    ClientRecvDATA::
     LET ipPort == <<_udp.destIp, _udp.destPort>> IN
     /\ IsDATA(_udp.payload)
     /\ _udp.srcIp = SERVER_IP
@@ -351,6 +358,7 @@ ClientRecvDATA(_udp) ==
 \* The server receives an ACK packet and sends DATA (RRQ transfer).
 \* @type: $udpPacket => Bool;
 ServerSendDATA(_udp) ==
+    ServerSendDATA::
     LET ipPort == <<_udp.srcIp, _udp.srcPort>> IN
     /\ IsACK(_udp.payload)
     /\ _udp.destIp = SERVER_IP
@@ -392,6 +400,7 @@ ServerSendDATA(_udp) ==
 \* The server receives an ACK packet and closes the connection (RRQ transfer).
 \* @type: $udpPacket => Bool;
 ServerRecvAckAndCloseConn(_udp) ==
+    ServerRecvAckAndCloseConn::
     LET ipPort == <<_udp.srcIp, _udp.srcPort>> IN
     /\ IsACK(_udp.payload)
     /\ _udp.destIp = SERVER_IP
@@ -419,6 +428,7 @@ ServerRecvAckAndCloseConn(_udp) ==
 \* The server receives an ERROR packet and closes the connection.
 \* @type: $udpPacket => Bool;
 ServerRecvErrorAndCloseConn(_udp) ==
+    ServerRecvErrorAndCloseConn::
     LET ipPort == <<_udp.srcIp, _udp.srcPort>> IN
     /\  IsERROR(_udp.payload)
     /\  _udp.destIp = SERVER_IP
@@ -439,6 +449,7 @@ ServerRecvErrorAndCloseConn(_udp) ==
 \* The client receives an ERROR packet and closes the connection.
 \* @type: $udpPacket => Bool;
 ClientRecvErrorAndCloseConn(_udp) ==
+    ClientRecvErrorAndCloseConn::
     LET ipPort == <<_udp.srcIp, _udp.srcPort>> IN
     /\  IsERROR(_udp.payload)
     /\  _udp.destIp = SERVER_IP
@@ -461,12 +472,14 @@ ClientRecvErrorAndCloseConn(_udp) ==
 \* Advance the global clock by some delta in the range [1, 255].
 \* The choice of the interval is dictated by the TFTP timeout option range.
 AdvanceClock(delta) ==
+    AdvanceClock::
     /\ clock' = clock + delta
     /\ lastAction' = ActionAdvanceClock(delta)
     /\ UNCHANGED <<packets, serverTransfers, clientTransfers>>
 
 \* The server drops a connection due to timeout.
 ServerTimeout(ipPort) ==
+    ServerTimeout::
     /\ ipPort \in DOMAIN serverTransfers
     /\ LET transfer == serverTransfers[ipPort] IN
         /\ clock > transfer.timestamp + transfer.timeout
@@ -478,6 +491,7 @@ ServerTimeout(ipPort) ==
 
 \* A client drops a connection due to timeout.
 ClientTimeout(ipPort) ==
+    ClientTimeout::
     /\ ipPort \in DOMAIN clientTransfers
     /\ LET transfer == clientTransfers[ipPort] IN
         /\ clock > transfer.timestamp + transfer.timeout
