@@ -12,6 +12,7 @@ This script:
 Claude Sonnet 4.5 and Igor Konnov, 2025
 """
 
+from collections import namedtuple
 from copy import deepcopy
 import json
 import logging
@@ -178,44 +179,44 @@ class TftpTestHarness:
                 except (ValueError, TypeError):
                     typed_options[key] = value
 
-            expected['payload'] = {
-                'tag': 'OACK',
-                'value': {
+            oackType = namedtuple("OACK", ["value"])
+            expected['payload'] = oackType(
+                value = {
                     'opcode': 6,
                     'options': typed_options
                 }
-            }
+            )
         elif opcode == 3:  # DATA
             block_num = response.get('block_num')
             data = response.get('data', 0)  # size or actual data
-            expected['payload'] = {
-                'tag': 'DATA',
-                'value': {
+            dataType = namedtuple("DATA", ["value"])
+            expected['payload'] = dataType(
+                value = {
                     'opcode': 3,
                     'blockNum': block_num,
                     'data': data
                 }
-            }
+            )
         elif opcode == 4:  # ACK
             block_num = response.get('block_num')
-            expected['payload'] = {
-                'tag': 'ACK',
-                'value': {
+            ackType = namedtuple("ACK", ["value"])
+            expected['payload'] = ackType(
+                value = {
                     'opcode': 4,
                     'blockNum': block_num
                 }
-            }
+            )
         elif opcode == 5:  # ERROR
             error_code = response.get('error_code')
             error_msg = response.get('error_msg', '')
-            expected['payload'] = {
-                'tag': 'ERROR',
-                'value': {
+            errorType = namedtuple("ERROR", ["value"])
+            expected['payload'] = errorType(
+                value = {
                     'opcode': 5,
                     'errorCode': error_code,
                     'errorMsg': error_msg
                 }
-            }
+            )
 
         return expected
 
@@ -234,13 +235,17 @@ class TftpTestHarness:
             return []
         
         packet = operation['packet_from_server']
-        payload = packet.get('payload', {})
+        payload = packet.get('payload')
         
-        # Check if payload has a tag
-        if not payload or 'tag' not in payload:
+        # Check if payload exists and get its type name (for namedtuples)
+        if not payload:
             return []
         
-        tag = payload['tag']
+        # For namedtuples, the type name is the tag
+        if hasattr(payload, '__class__'):
+            tag = type(payload).__name__
+        else:
+            return []
         
         if tag == 'DATA':
             return ['ServerRecvRRQthenSendData', 'ServerSendDATA']
@@ -633,7 +638,7 @@ class TftpTestHarness:
                         # Execute the corresponding TFTP operation
                         operation = self.execute_tftp_operation(next_trans["index"])
                         if operation:
-                            # TODO: called it a log?
+                            # TODO: call it a log?
                             self.current_commands.append(operation)
 
                             if 'packet_from_server' in operation:
@@ -645,18 +650,19 @@ class TftpTestHarness:
                             self.log.error("No operation to validate on SUT turn")
                             return False
 
-                        expected_last_action = {
-                            'tag': 'ActionRecvSend',
-                            'value': {
+                        actionRecvSendType = namedtuple("ActionRecvSend", ["value"])
+                        expected_last_action = actionRecvSendType(
+                            value = {
                                 'rcvd': operation['packet_to_server'],
                                 'sent': operation['packet_from_server'],
                             }
-                        }
+                        )
                         self.log.info(f"Assume lastAction: {expected_last_action}")
                         # Assume that lastAction equals the reconstructed action
                         equalities = {
                             "lastAction": value_to_json(expected_last_action)
                         }
+                        print(f"Equalities for SUT turn: {equalities}")
                         assume_result = self.client.assume_state(equalities, check_enabled=True)
                         if isinstance(assume_result, AssumptionEnabled):
                             self.log.info("✓ Received packet matches symbolic execution")
