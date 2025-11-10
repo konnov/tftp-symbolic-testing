@@ -179,8 +179,9 @@ class TftpTestHarness:
                 except (ValueError, TypeError):
                     typed_options[key] = value
 
-            oackType = namedtuple("OACK", ["value"])
+            oackType = namedtuple("OACK", ["tag", "value"])
             expected['payload'] = oackType(
+                tag="OACK",
                 value = {
                     'opcode': 6,
                     'options': typed_options
@@ -189,8 +190,9 @@ class TftpTestHarness:
         elif opcode == 3:  # DATA
             block_num = response.get('block_num')
             data = response.get('data', 0)  # size or actual data
-            dataType = namedtuple("DATA", ["value"])
+            dataType = namedtuple("DATA", ["tag", "value"])
             expected['payload'] = dataType(
+                tag="DATA",
                 value = {
                     'opcode': 3,
                     'blockNum': block_num,
@@ -199,8 +201,9 @@ class TftpTestHarness:
             )
         elif opcode == 4:  # ACK
             block_num = response.get('block_num')
-            ackType = namedtuple("ACK", ["value"])
+            ackType = namedtuple("ACK", ["tag", "value"])
             expected['payload'] = ackType(
+                tag="ACK",
                 value = {
                     'opcode': 4,
                     'blockNum': block_num
@@ -209,8 +212,9 @@ class TftpTestHarness:
         elif opcode == 5:  # ERROR
             error_code = response.get('error_code')
             error_msg = response.get('error_msg', '')
-            errorType = namedtuple("ERROR", ["value"])
+            errorType = namedtuple("ERROR", ["tag", "value"])
             expected['payload'] = errorType(
+                tag="ERROR",
                 value = {
                     'opcode': 5,
                     'errorCode': error_code,
@@ -650,8 +654,9 @@ class TftpTestHarness:
                             self.log.error("No operation to validate on SUT turn")
                             return False
 
-                        actionRecvSendType = namedtuple("ActionRecvSend", ["value"])
+                        actionRecvSendType = namedtuple("ActionRecvSend", ["tag", "value"])
                         expected_last_action = actionRecvSendType(
+                            tag="ActionRecvSend",
                             value = {
                                 'rcvd': operation['packet_to_server'],
                                 'sent': operation['packet_from_server'],
