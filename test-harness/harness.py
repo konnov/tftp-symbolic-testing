@@ -615,7 +615,13 @@ class TftpTestHarness:
                 snapshot_before = self.current_snapshot
 
                 # Try the transition in Apalache
-                if self.try_transition(next_trans):
+                if not self.try_transition(next_trans):
+                    # Transition was disabled, rollback and try another
+                    if snapshot_before is not None:
+                        self.log.info(f"Rollback to snapshot {snapshot_before}")
+                        self.client.rollback(snapshot_before)
+                        self.current_snapshot = snapshot_before
+                else:
                     enabled_found = True
                     self.current_transitions.append(next_trans)
 
@@ -626,11 +632,13 @@ class TftpTestHarness:
                         # Execute the corresponding TFTP operation
                         operation = self.execute_tftp_operation(next_trans["index"])
                         if operation:
-                            # We have received feedback from the SUT.
-                            # Plan its evaluation for the next iteration.
-                            turn = SUT
-                            # TODO: remove current_commands?
+                            # TODO: called it a log?
                             self.current_commands.append(operation)
+
+                            if 'packet_from_server' in operation:
+                                # We have received feedback from the SUT.
+                                # Plan its evaluation for the next iteration.
+                                turn = SUT
                     else:
                         if not operation:
                             self.log.error("No operation to validate on SUT turn")
@@ -659,12 +667,6 @@ class TftpTestHarness:
                             # Continue to save at the end of the run
                         else:
                             self.log.warning("? Unable to validate received packet")
-                else:
-                    # Transition was disabled, rollback and try another
-                    if snapshot_before is not None:
-                        self.log.info(f"Rollback to snapshot {snapshot_before}")
-                        self.client.rollback(snapshot_before)
-                        self.current_snapshot = snapshot_before
 
             if not enabled_found:
                 self.log.warning(f"✗ Could not find enabled transition for turn '{turn}' - ending test run")
