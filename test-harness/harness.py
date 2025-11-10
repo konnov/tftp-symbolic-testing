@@ -219,28 +219,36 @@ class TftpTestHarness:
 
         return expected
 
-    def _labels_from_packet(self, packet: Dict[str, Any]) -> List[str]:
+    def _labels_from_packet(self, operation: Dict[str, Any]) -> List[str]:
         """
-        Generate the list of action labels that match the expected packet,
-        which is returned by `_construct_expected_packet`.
+        Generate the list of action labels that match the expected packet
+        from an operation returned by `execute_tftp_operation`.
 
         Args:
-            packet: Packet dictionary containing payload
+            operation: Operation dictionary from execute_tftp_operation
         Returns:
-            Action label string
+            List of action label strings
         """
-        payload = packet.get('payload', {})
-        tag = payload['tag']
-        if not tag:
+        # Check if operation has an expected_packet
+        if not operation or 'expected_packet' not in operation:
             return []
-
+        
+        packet = operation['expected_packet']
+        payload = packet.get('payload', {})
+        
+        # Check if payload has a tag
+        if not payload or 'tag' not in payload:
+            return []
+        
+        tag = payload['tag']
+        
         if tag == 'DATA':
             return ['ServerRecvRRQthenSendData', 'ServerSendDATA']
         elif tag == 'OACK':
             return ['ServerRecvRRQthenSendOACK']
         elif tag == 'ERROR':
             return ['ServerRecvRRQthenSendError']
-        # TODO: handle 'ACK' when we deal with RWQ
+        # TODO: handle 'ACK' when we deal with WRQ
 
         return []
 
