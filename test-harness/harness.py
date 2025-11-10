@@ -219,7 +219,7 @@ class TftpTestHarness:
 
         return expected
 
-    def _labels_from_packet(self, operation: Dict[str, Any]) -> List[str]:
+    def _labels_from_operation(self, operation: Dict[str, Any]) -> List[str]:
         """
         Generate the list of action labels that match the expected packet
         from an operation returned by `execute_tftp_operation`.
@@ -230,10 +230,10 @@ class TftpTestHarness:
             List of action label strings
         """
         # Check if operation has an expected_packet
-        if not operation or 'expected_packet' not in operation:
+        if not operation or 'packet_from_server' not in operation:
             return []
         
-        packet = operation['expected_packet']
+        packet = operation['packet_from_server']
         payload = packet.get('payload', {})
         
         # Check if payload has a tag
@@ -245,7 +245,7 @@ class TftpTestHarness:
         if tag == 'DATA':
             return ['ServerRecvRRQthenSendData', 'ServerSendDATA']
         elif tag == 'OACK':
-            return ['ServerRecvRRQthenSendOACK']
+            return ['ServerRecvRRQthenSendOack']
         elif tag == 'ERROR':
             return ['ServerRecvRRQthenSendError']
         # TODO: handle 'ACK' when we deal with WRQ
@@ -601,9 +601,10 @@ class TftpTestHarness:
                     if frozenset(trans.get("labels")).intersection(TESTER_ACTION_LABELS)
                 ]
             else:
-                packet_labels = self._labels_from_packet(operation) if operation else []
+                op_labels = self._labels_from_operation(operation) if operation else []
+                print(f"Operation labels for SUT turn: {op_labels}")
                 transitions_to_try = [ trans for trans in next_transitions \
-                    if any(label in packet_labels for label in trans.get("labels", []))
+                    if any(label in op_labels for label in trans.get("labels", []))
                 ]
 
             while len(transitions_to_try) > 0 and not enabled_found:
