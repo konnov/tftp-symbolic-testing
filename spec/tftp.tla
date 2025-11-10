@@ -240,7 +240,6 @@ ServerRecvRRQ(_udp) ==
 \* or rejects the options and sends ERROR.
 \* @type: $udpPacket => Bool;
 ClientRecvOACK(_udp) ==
-    ClientRecvOACK::
     LET ipPort == <<_udp.destIp, _udp.destPort>> IN
     /\  IsOACK(_udp.payload)
     /\  _udp.srcIp = SERVER_IP
@@ -270,7 +269,8 @@ ClientRecvOACK(_udp) ==
         /\  clock <= transfer.timestamp + transfer.timeout
         \* the OACK packet is received right after RRQ (RFC 2347)
         /\  transfer.blockNum = 0
-        /\  \/  \* the nominal case: accept OACK and send ACK for block 0
+        /\  \/  ClientRecvOACKthenSendAck::
+                \* the nominal case: accept OACK and send ACK for block 0
                 \* However, check that the server behaves as per RFC 2347.
                 /\  ("tsize" \in DOMAIN oack.options)
                         => (oack.options["tsize"] <= transfer.tsize)
@@ -283,7 +283,8 @@ ClientRecvOACK(_udp) ==
                         [ clientTransfers EXCEPT ![ipPort] = newTransfer ]
                 /\  packets' = packets \union { ackPacket }
                 /\ lastAction' = ActionRecvSend(_udp, ackPacket)
-            \/  \* the client may also reject the OACK by sending an ERROR
+            \/  ClientRecvOACKthenSendError::
+                \* the client may also reject the OACK by sending an ERROR
                 LET errorPacket == [
                     srcIp |-> _udp.destIp,
                     srcPort |-> _udp.destPort,

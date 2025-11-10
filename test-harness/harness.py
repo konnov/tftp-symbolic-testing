@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from itf_py import Trace, trace_from_json
+from itf_py import Trace, trace_from_json, value_to_json
 
 from client import (
     JsonRpcClient,
@@ -33,6 +33,17 @@ from client import (
 )
 from docker_manager import DockerManager
 from server import ApalacheServer
+
+# The labels of the spec actions that are controlled by the tester.
+# The other labels are controlled by the SUT (TFTP server).
+TESTER_ACTION_LABELS = frozenset([
+    "Init", "ClientSendRRQ", "ClientTimeout",
+    "ClientRecvOACKthenSendAck", "ClientRecvOACKthenSendError",
+    "ClientRecvDATA", "AdvanceClock", "ClientRecvErrorAndCloseConn"
+])
+
+TESTER = "tester"
+SUT = "sut"
 
 
 class TftpTestHarness:
@@ -156,6 +167,7 @@ class TftpTestHarness:
         }
 
         # Add payload based on opcode
+        # Payload structure matches TLA+ Variant type: {tag: "...", value: {...}}
         if opcode == 6:  # OACK
             options = response.get('options', {})
             # Convert string values to integers where applicable
@@ -168,32 +180,69 @@ class TftpTestHarness:
 
             expected['payload'] = {
                 'tag': 'OACK',
-                'options': typed_options
+                'value': {
+                    'opcode': 6,
+                    'options': typed_options
+                }
             }
         elif opcode == 3:  # DATA
             block_num = response.get('block_num')
-            data_size = response.get('data_size', 0)
+            data = response.get('data', 0)  # size or actual data
             expected['payload'] = {
                 'tag': 'DATA',
-                'blockNum': block_num,
-                'dataSize': data_size
+                'value': {
+                    'opcode': 3,
+                    'blockNum': block_num,
+                    'data': data
+                }
             }
         elif opcode == 4:  # ACK
             block_num = response.get('block_num')
             expected['payload'] = {
                 'tag': 'ACK',
-                'blockNum': block_num
+                'value': {
+                    'opcode': 4,
+                    'blockNum': block_num
+                }
             }
         elif opcode == 5:  # ERROR
             error_code = response.get('error_code')
             error_msg = response.get('error_msg', '')
             expected['payload'] = {
                 'tag': 'ERROR',
-                'errorCode': error_code,
-                'errorMsg': error_msg
+                'value': {
+                    'opcode': 5,
+                    'errorCode': error_code,
+                    'errorMsg': error_msg
+                }
             }
 
         return expected
+
+    def _labels_from_packet(self, packet: Dict[str, Any]) -> List[str]:
+        """
+        Generate the list of action labels that match the expected packet,
+        which is returned by `_construct_expected_packet`.
+
+        Args:
+            packet: Packet dictionary containing payload
+        Returns:
+            Action label string
+        """
+        payload = packet.get('payload', {})
+        tag = payload['tag']
+        if not tag:
+            return []
+
+        if tag == 'DATA':
+            return ['ServerRecvRRQthenSendData', 'ServerSendDATA']
+        elif tag == 'OACK':
+            return ['ServerRecvRRQthenSendOACK']
+        elif tag == 'ERROR':
+            return ['ServerRecvRRQthenSendError']
+        # TODO: handle 'ACK' when we deal with RWQ
+
+        return []
 
     def load_specification(self, solver_timeout: int = 300):
         """Load the TFTP specification into Apalache."""
@@ -229,17 +278,26 @@ class TftpTestHarness:
 
         self.current_snapshot = self.spec_params['snapshot_id']
         self.log.info(f"Specification loaded. Snapshot ID: {self.current_snapshot}")
-        self.log.info(f"Init transitions: {len(self.spec_params['init'])}")
-        self.log.info(f"Next transitions: {len(self.spec_params['next'])}")
+        self.log.info(f"{len(self.spec_params['init'])} init transitions")
+        for trans in self.spec_params['init']:
+            index = trans['index']
+            labels = ','.join(trans.get('labels', []))
+            self.log.info(f"  Init {index} [{labels}]")
+
+        self.log.info(f"{len(self.spec_params['next'])} next transitions")
+        for trans in self.spec_params['next']:
+            index = trans['index']
+            labels = ','.join(trans.get('labels', []))
+            self.log.info(f"  Next {index} [{labels}]")
 
         return True
 
-    def try_transition(self, transition_id: int) -> bool:
+    def try_transition(self, transition: Dict['str', Any]) -> bool:
         """
         Try to assume a transition and check if it's enabled.
 
         Args:
-            transition_id: The ID of the transition to try
+            transition: Transition dictionary as returned by load_spec
 
         Returns:
             True if the transition is enabled, False otherwise
@@ -247,7 +305,9 @@ class TftpTestHarness:
         if not self.client:
             raise RuntimeError("Client not initialized")
 
-        self.log.info(f"Trying transition {transition_id}...")
+        transition_id = transition['index']
+        labels = ','.join(transition.get('labels', []))
+        self.log.info(f"Trying transition {transition_id} [{labels}]...")
 
         result = self.client.assume_transition(transition_id, check_enabled=True)
 
@@ -364,7 +424,8 @@ class TftpTestHarness:
                             # Decode response and construct expected packet for TLA+ validation
                             if 'opcode' in response and 'error' not in response:
                                 expected_packet = self._construct_expected_packet(response)
-                                operation['expected_packet'] = expected_packet
+                                operation['packet_from_server'] = expected_packet
+                                operation['packet_to_server'] = sent_packet
                                 self.log.info(f"Expected packet for validation: {expected_packet}")
                         else:
                             self.log.warning("No response from Docker client")
@@ -506,7 +567,7 @@ class TftpTestHarness:
         init_trans = random.choice(init_transitions)
         self.log.info(f"Selected init transition: {init_trans}")
 
-        if not self.try_transition(init_trans["index"]):
+        if not self.try_transition(init_trans):
             self.log.error("Init transition is not enabled")
             return False
 
@@ -518,13 +579,25 @@ class TftpTestHarness:
         # Main exploration loop
         next_transitions = self.spec_params['next']
 
+        turn = TESTER   # Track whose turn it is: tester or SUT
+        operation = None   # the last operation executed (from tester side)
         for step in range(max_steps):
             self.log.info(f"\n--- Step {step + 1}/{max_steps} ---")
 
             enabled_found = False
 
-            # Try to find an enabled transition
-            transitions_to_try = deepcopy(next_transitions)
+            # Try to find an enabled transition by the player whose turn it is.
+            # Only use the transitions that match the current turn.
+            if turn == TESTER:
+                transitions_to_try = [ trans for trans in next_transitions \
+                    if frozenset(trans.get("labels")).intersection(TESTER_ACTION_LABELS)
+                ]
+            else:
+                packet_labels = self._labels_from_packet(operation) if operation else []
+                transitions_to_try = [ trans for trans in next_transitions \
+                    if any(label in packet_labels for label in trans.get("labels", []))
+                ]
+
             while len(transitions_to_try) > 0 and not enabled_found:
                 # Select a random next transition from the transitions we have not tried yet
                 next_trans = random.choice(transitions_to_try)
@@ -533,24 +606,51 @@ class TftpTestHarness:
                 # Save current snapshot before trying
                 snapshot_before = self.current_snapshot
 
-                # Try the transition
-                if self.try_transition(next_trans["index"]):
+                # Try the transition in Apalache
+                if self.try_transition(next_trans):
                     enabled_found = True
                     self.current_transitions.append(next_trans)
 
-                    # Execute the corresponding TFTP operation
-                    operation = self.execute_tftp_operation(next_trans["index"])
-                    if operation:
-                        self.current_commands.append(operation)
-
-                    # Move to next step
+                    # Move to next step in Apalache
                     self.current_snapshot = self.client.next_step()
 
-                    # TODO: In a real implementation, push constraints from
-                    # the UDP response and check if they're satisfied
-                    # For now, we continue until max_steps
+                    if turn == TESTER:
+                        # Execute the corresponding TFTP operation
+                        operation = self.execute_tftp_operation(next_trans["index"])
+                        if operation:
+                            # We have received feedback from the SUT.
+                            # Plan its evaluation for the next iteration.
+                            turn = SUT
+                            # TODO: remove current_commands?
+                            self.current_commands.append(operation)
+                    else:
+                        if not operation:
+                            self.log.error("No operation to validate on SUT turn")
+                            return False
 
-                    break
+                        expected_last_action = {
+                            'tag': 'ActionRecvSend',
+                            'value': {
+                                'rcvd': operation['packet_to_server'],
+                                'sent': operation['packet_from_server'],
+                            }
+                        }
+                        self.log.info(f"Assume lastAction: {expected_last_action}")
+                        # Assume that lastAction equals the reconstructed action
+                        equalities = {
+                            "lastAction": value_to_json(expected_last_action)
+                        }
+                        assume_result = self.client.assume_state(equalities, check_enabled=True)
+                        if isinstance(assume_result, AssumptionEnabled):
+                            self.log.info("✓ Received packet matches symbolic execution")
+                            turn = TESTER
+                            operation = None
+                        elif isinstance(assume_result, AssumptionDisabled):
+                            self.log.warning("✗ Received packet does NOT match symbolic execution - test diverged!")
+                            # Test found a discrepancy - this is valuable!
+                            # Continue to save at the end of the run
+                        else:
+                            self.log.warning("? Unable to validate received packet")
                 else:
                     # Transition was disabled, rollback and try another
                     if snapshot_before is not None:
@@ -559,7 +659,7 @@ class TftpTestHarness:
                         self.current_snapshot = snapshot_before
 
             if not enabled_found:
-                self.log.warning(f"Could not find enabled transition")
+                self.log.warning(f"✗ Could not find enabled transition for turn '{turn}' - ending test run")
                 break
 
         # Save the test run
