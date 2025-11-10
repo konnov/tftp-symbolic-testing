@@ -141,7 +141,7 @@ class TftpTestHarness:
             self.log.info("Cleaning up Docker environment...")
             self.docker.cleanup()
 
-    def _construct_expected_packet(self, response: Dict[str, Any]) -> Dict[str, Any]:
+    def _construct_expected_packet(self, response: Dict[str, Any]) -> Any:
         """
         Construct an expected packet structure from Docker client response
         that matches the TLA+ specification format.
@@ -150,7 +150,7 @@ class TftpTestHarness:
             response: Response from Docker client containing packet details
 
         Returns:
-            Expected packet dictionary in TLA+ format
+            Expected packet as a namedtuple matching TLA+ $udpPacket type
         """
         # Extract packet details from response
         opcode = response.get('opcode')
@@ -158,14 +158,6 @@ class TftpTestHarness:
         src_port = response.get('src_port')
         dest_ip = response.get('dest_ip')
         dest_port = response.get('dest_port')
-
-        # Construct base packet structure matching TLA+ $udpPacket type
-        expected = {
-            'srcIp': src_ip,
-            'srcPort': src_port,
-            'destIp': dest_ip,
-            'destPort': dest_port,
-        }
 
         # Add payload based on opcode
         # Payload structure matches TLA+ Variant type: {tag: "...", value: {...}}
@@ -179,48 +171,71 @@ class TftpTestHarness:
                 except (ValueError, TypeError):
                     typed_options[key] = value
 
+            # Create payload variant
+            oackValueType = namedtuple("OACKValue", ["opcode", "options"])
             oackType = namedtuple("OACK", ["tag", "value"])
-            expected['payload'] = oackType(
+            payload = oackType(
                 tag="OACK",
-                value = {
-                    'opcode': 6,
-                    'options': typed_options
-                }
+                value=oackValueType(
+                    opcode=6,
+                    options=typed_options
+                )
             )
         elif opcode == 3:  # DATA
             block_num = response.get('block_num')
             data = response.get('data', 0)  # size or actual data
+
+            # Create payload variant
+            dataValueType = namedtuple("DATAValue", ["opcode", "blockNum", "data"])
             dataType = namedtuple("DATA", ["tag", "value"])
-            expected['payload'] = dataType(
+            payload = dataType(
                 tag="DATA",
-                value = {
-                    'opcode': 3,
-                    'blockNum': block_num,
-                    'data': data
-                }
+                value=dataValueType(
+                    opcode=3,
+                    blockNum=block_num,
+                    data=data
+                )
             )
         elif opcode == 4:  # ACK
             block_num = response.get('block_num')
+
+            # Create payload variant
+            ackValueType = namedtuple("ACKValue", ["opcode", "blockNum"])
             ackType = namedtuple("ACK", ["tag", "value"])
-            expected['payload'] = ackType(
+            payload = ackType(
                 tag="ACK",
-                value = {
-                    'opcode': 4,
-                    'blockNum': block_num
-                }
+                value=ackValueType(
+                    opcode=4,
+                    blockNum=block_num
+                )
             )
         elif opcode == 5:  # ERROR
             error_code = response.get('error_code')
             error_msg = response.get('error_msg', '')
+
+            # Create payload variant
+            errorValueType = namedtuple("ERRORValue", ["opcode", "errorCode", "errorMsg"])
             errorType = namedtuple("ERROR", ["tag", "value"])
-            expected['payload'] = errorType(
+            payload = errorType(
                 tag="ERROR",
-                value = {
-                    'opcode': 5,
-                    'errorCode': error_code,
-                    'errorMsg': error_msg
-                }
+                value=errorValueType(
+                    opcode=5,
+                    errorCode=error_code,
+                    errorMsg=error_msg
+                )
             )
+        else:
+            payload = None
+
+        # Construct packet record using namedtuple (not dict)
+        UdpPacketType = namedtuple("UdpPacket", ["srcIp", "srcPort", "destIp", "destPort", "payload"])
+        expected = UdpPacketType(
+            srcIp=src_ip,
+            srcPort=src_port,
+            destIp=dest_ip,
+            destPort=dest_port,
+            payload=payload
+        )
 
         return expected
 
@@ -237,20 +252,21 @@ class TftpTestHarness:
         # Check if operation has an expected_packet
         if not operation or 'packet_from_server' not in operation:
             return []
-        
+
         packet = operation['packet_from_server']
-        payload = packet.get('payload')
-        
+        # For namedtuples, access payload as an attribute
+        payload = packet.payload if hasattr(packet, 'payload') else None
+
         # Check if payload exists and get its type name (for namedtuples)
         if not payload:
             return []
-        
+
         # For namedtuples, the type name is the tag
         if hasattr(payload, '__class__'):
             tag = type(payload).__name__
         else:
             return []
-        
+
         if tag == 'DATA':
             return ['ServerRecvRRQthenSendData', 'ServerSendDATA']
         elif tag == 'OACK':
@@ -654,13 +670,15 @@ class TftpTestHarness:
                             self.log.error("No operation to validate on SUT turn")
                             return False
 
+                        # Create the value record as a namedtuple
+                        ActionRecvSendValueType = namedtuple("ActionRecvSendValue", ["rcvd", "sent"])
                         actionRecvSendType = namedtuple("ActionRecvSend", ["tag", "value"])
                         expected_last_action = actionRecvSendType(
                             tag="ActionRecvSend",
-                            value = {
-                                'rcvd': operation['packet_to_server'],
-                                'sent': operation['packet_from_server'],
-                            }
+                            value=ActionRecvSendValueType(
+                                rcvd=operation['packet_to_server'],
+                                sent=operation['packet_from_server']
+                            )
                         )
                         self.log.info(f"Assume lastAction: {expected_last_action}")
                         # Assume that lastAction equals the reconstructed action
