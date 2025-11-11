@@ -255,6 +255,9 @@ class TftpClient:
             else:
                 sock.bind((self.client_ip, 0))
 
+            actual_port = sock.getsockname()[1]
+            self.log.info(f"Using source port: {actual_port}")
+
             ack_packet = self.encode_ack(block_num)
             sock.sendto(ack_packet, (self.server_ip, dest_port))
             self.log.info(f"Sent ACK to {self.server_ip}:{dest_port}")
@@ -265,6 +268,8 @@ class TftpClient:
                 response = self.decode_packet(data)
                 response['src_ip'] = addr[0]
                 response['src_port'] = addr[1]
+                response['dest_ip'] = self.client_ip
+                response['dest_port'] = actual_port
                 return response
             except socket.timeout:
                 return {'status': 'ack_sent', 'timeout': True}

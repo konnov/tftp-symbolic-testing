@@ -201,10 +201,10 @@ class TftpTestHarness:
         """
         # Extract packet details from response
         opcode = response.get('opcode')
-        src_ip = response.get('src_ip')
-        src_port = response.get('src_port')
-        dest_ip = response.get('dest_ip')
-        dest_port = response.get('dest_port')
+        src_ip = response.get('src_ip', '')
+        src_port = response.get('src_port', 0)
+        dest_ip = response.get('dest_ip', '')
+        dest_port = response.get('dest_port', 0)
 
         # Add payload based on opcode
         # Payload structure matches TLA+ Variant type with dataclass for value
