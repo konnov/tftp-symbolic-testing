@@ -696,9 +696,12 @@ class TftpTestHarness:
 
         turn = TESTER   # Track whose turn it is: tester or SUT
         operation = None   # the last operation executed (from tester side)
+        error_found = False
         for step in range(max_steps):
-            self.log.info(f"\n--- Step {step + 1}/{max_steps} ---")
+            if error_found:
+                break
 
+            self.log.info(f"\n--- Step {step + 1}/{max_steps} ---")
             enabled_found = False
 
             # Try to find an enabled transition by the player whose turn it is.
@@ -714,7 +717,7 @@ class TftpTestHarness:
                     if any(label in op_labels for label in trans.get("labels", []))
                 ]
 
-            while len(transitions_to_try) > 0 and not enabled_found:
+            while len(transitions_to_try) > 0 and not enabled_found and not error_found:
                 # Select a random next transition from the transitions we have not tried yet
                 next_trans = random.choice(transitions_to_try)
                 transitions_to_try.remove(next_trans)
@@ -771,6 +774,8 @@ class TftpTestHarness:
                             self.log.warning("✗ Received packet does NOT match the spec - test diverged!")
                             # Test found a discrepancy - this is valuable!
                             # Continue to save at the end of the run
+                            error_found = True
+                            break
                         else:
                             self.log.warning("? Unable to validate received packet")
 
@@ -855,8 +860,8 @@ def main():
                         help='Enable Docker for actual TFTP operations')
     parser.add_argument('--tests', type=int, default=3,
                         help='Number of test runs to generate (default: 3)')
-    parser.add_argument('--steps', type=int, default=10,
-                        help='Maximum steps per test run (default: 10)')
+    parser.add_argument('--steps', type=int, default=100,
+                        help='Maximum steps per test run (default: 100)')
     args = parser.parse_args()
 
     # Configuration
