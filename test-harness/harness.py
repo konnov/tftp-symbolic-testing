@@ -14,7 +14,7 @@ Claude Sonnet 4.5 and Igor Konnov, 2025
 
 from collections import namedtuple
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 import json
 import logging
 import os
@@ -143,7 +143,7 @@ class TftpTestHarness:
         # Test run tracking
         self.test_run_number = 0
         self.current_transitions = []
-        self.current_commands = []
+        self.command_log = []
 
     def setup_logging(self):
         """Configure logging for the harness."""
@@ -752,20 +752,30 @@ class TftpTestHarness:
             f.write(','.join(map(str, self.current_transitions)))
 
         def default(obj):
-            if hasattr(obj, "__dataclass_fields__"):
-                return asdict(obj)
-            raise TypeError(f"Type {type(obj)} not serializable")
+            # --- Dataclasses ---
+            if is_dataclass(obj):
+                tag = getattr(obj.__class__, "__name__", None) # type: ignore
+                return {"tag": tag, **asdict(obj)} # type: ignore
+
+            # --- Namedtuples ---
+            if isinstance(obj, tuple) and hasattr(obj, "_fields"):
+                tag = getattr(obj.__class__, "__name__", None)
+                data = {f: getattr(obj, f) for f in obj._fields} # type: ignore
+                return {"tag": tag, **data}
+
+            # --- Fallback ---
+            return super().default(obj) # type: ignore
 
         # Save commands and responses
         commands_file = run_dir / "commands.json"
         with open(commands_file, 'w') as f:
-            json.dump(self.current_commands, f, indent=2, default=default)
+            json.dump(self.command_log, f, indent=2, default=default)
 
         self.log.info(f"Test run {self.test_run_number} saved to {run_dir}")
 
         # Reset for next run
         self.current_transitions = []
-        self.current_commands = []
+        self.command_log = []
 
     def generate_test_run(self, max_steps: int = 20) -> bool:
         """
@@ -855,8 +865,7 @@ class TftpTestHarness:
                         # Execute the corresponding TFTP operation
                         operation = self.execute_tftp_operation(next_trans["index"])
                         if operation:
-                            # TODO: call it a log?
-                            self.current_commands.append(operation)
+                            self.command_log.append(operation)
 
                             if 'packet_from_server' in operation:
                                 # We have received feedback from the SUT.
