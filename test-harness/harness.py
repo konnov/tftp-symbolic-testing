@@ -240,7 +240,7 @@ class TftpTestHarness:
             payload = DATA(
                 opcode=3,
                 blockNum=response.get('block_num', 0),
-                data=response.get('data', 0)
+                data=response.get('data_length', 0)
             )
         elif opcode == 4:  # ACK
             # Create payload variant using module-level dataclass
@@ -792,7 +792,7 @@ class TftpTestHarness:
             return False
 
         init_trans = random.choice(init_transitions)
-        self.log.info(f"Selected init transition: {init_trans}")
+        self.log.debug(f"Selected init transition: {init_trans}")
 
         if not self.try_transition(init_trans):
             self.log.error("Init transition is not enabled")
