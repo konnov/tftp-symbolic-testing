@@ -14,7 +14,7 @@ Claude Sonnet 4.5 and Igor Konnov, 2025
 
 from collections import namedtuple
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import json
 import logging
 import os
@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from itf_py import Trace, trace_from_json, value_to_json
+from itf_py import Trace, itf_variant, trace_from_json, value_to_json
 
 from client import (
     JsonRpcClient,
@@ -40,6 +40,7 @@ from server import ApalacheServer
 # Variant type dataclasses for TLA+ types
 # Class names must match variant tags exactly (required by itf-py)
 
+@itf_variant
 @dataclass
 class OACK:
     """TFTP OACK (Option Acknowledgment) packet variant."""
@@ -47,6 +48,7 @@ class OACK:
     options: Dict[str, int]
 
 
+@itf_variant
 @dataclass
 class DATA:
     """TFTP DATA packet variant."""
@@ -55,6 +57,7 @@ class DATA:
     data: int
 
 
+@itf_variant
 @dataclass
 class ACK:
     """TFTP ACK (Acknowledgment) packet variant."""
@@ -62,6 +65,7 @@ class ACK:
     blockNum: int
 
 
+@itf_variant
 @dataclass
 class ERROR:
     """TFTP ERROR packet variant."""
@@ -70,6 +74,7 @@ class ERROR:
     errorMsg: str
 
 
+@itf_variant
 @dataclass
 class ActionRecvSend:
     """Action representing receiving and sending packets."""
@@ -491,8 +496,8 @@ class TftpTestHarness:
                     rcvd_packet = last_action.rcvd
                     sent_packet = last_action.sent
                     self.log.info(f"Action: Receive and Send")
-                    self.log.info(f"  Received packet type: {type(rcvd_packet)}")
-                    self.log.info(f"  Sent packet type: {type(sent_packet)}")
+                    self.log.info(f"  Received packet: {rcvd_packet}")
+                    self.log.info(f"  Sent packet: {sent_packet}")
                     operation['command'] = 'recv_send'
                     operation['rcvd_packet'] = rcvd_packet
                     operation['sent_packet'] = sent_packet
@@ -501,7 +506,7 @@ class TftpTestHarness:
                 elif action_tag == 'ActionRecvClose':
                     rcvd_packet = last_action.rcvd
                     self.log.info(f"Action: Receive and Close")
-                    self.log.info(f"  Received packet type: {type(rcvd_packet)}")
+                    self.log.info(f"  Received packet: {rcvd_packet}")
                     operation['command'] = 'recv_close'
                     operation['rcvd_packet'] = rcvd_packet
                     # TODO: Close the connection
@@ -584,10 +589,15 @@ class TftpTestHarness:
         with open(transitions_file, 'w') as f:
             f.write(','.join(map(str, self.current_transitions)))
 
+        def default(obj):
+            if hasattr(obj, "__dataclass_fields__"):
+                return asdict(obj)
+            raise TypeError(f"Type {type(obj)} not serializable")
+
         # Save commands and responses
         commands_file = run_dir / "commands.json"
         with open(commands_file, 'w') as f:
-            json.dump(self.current_commands, f, indent=2)
+            json.dump(self.current_commands, f, indent=2, default=default)
 
         self.log.info(f"Test run {self.test_run_number} saved to {run_dir}")
 
@@ -702,14 +712,13 @@ class TftpTestHarness:
                         equalities = {
                             "lastAction": value_to_json(expected_last_action)
                         }
-                        print(f"Equalities for SUT turn: {equalities}")
                         assume_result = self.client.assume_state(equalities, check_enabled=True)
                         if isinstance(assume_result, AssumptionEnabled):
-                            self.log.info("✓ Received packet matches symbolic execution")
+                            self.log.info("✓ Received packet matches the spec")
                             turn = TESTER
                             operation = None
                         elif isinstance(assume_result, AssumptionDisabled):
-                            self.log.warning("✗ Received packet does NOT match symbolic execution - test diverged!")
+                            self.log.warning("✗ Received packet does NOT match the spec - test diverged!")
                             # Test found a discrepancy - this is valuable!
                             # Continue to save at the end of the run
                         else:
