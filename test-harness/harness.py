@@ -71,7 +71,6 @@ class ERROR:
     """TFTP ERROR packet variant."""
     opcode: int
     errorCode: int
-    errorMsg: str
 
 
 @itf_variant
@@ -224,32 +223,23 @@ class TftpTestHarness:
                 options=typed_options
             )
         elif opcode == 3:  # DATA
-            block_num = response.get('block_num', 0)
-            data = response.get('data', 0)  # size or actual data
-
             # Create payload variant using module-level dataclass
             payload = DATA(
                 opcode=3,
-                blockNum=block_num,
-                data=data
+                blockNum=response.get('block_num', 0),
+                data=response.get('data', 0)
             )
         elif opcode == 4:  # ACK
-            block_num = response.get('block_num', 0)
-
             # Create payload variant using module-level dataclass
             payload = ACK(
                 opcode=4,
-                blockNum=block_num
+                blockNum=response.get('block_num', 0)
             )
         elif opcode == 5:  # ERROR
-            error_code = response.get('error_code', 0)
-            error_msg = response.get('error_msg', '')
-
             # Create payload variant using module-level dataclass
             payload = ERROR(
                 opcode=5,
-                errorCode=error_code,
-                errorMsg=error_msg
+                errorCode=response.get('error_code', 0),
             )
         else:
             payload = None
