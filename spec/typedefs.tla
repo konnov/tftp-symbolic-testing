@@ -31,8 +31,9 @@ OPCODE_OACK == 6
     // In our specification, we simply pass the length of data instead of the
     // data itself. The test harness should pass the actual data.
     | DATA({ opcode: Int, blockNum: Int, data: Int })
-    // Error packet (RFC 1350, Figure 5-4)
-    | ERROR({ opcode: Int, errorCode: Int, msg: Str })
+    // Error packet (RFC 1350, Figure 5-4).
+    // We omit error messages as they differ in practice and are not relevant for the spec.
+    | ERROR({ opcode: Int, errorCode: Int })
   ;
 
   // UDP Packet encapsulating a TFTP packet (we omit irrelevant fields).
@@ -133,14 +134,14 @@ IsDATA(_packet) == VariantTag(_packet) = "DATA"
 \* @type: $tftpPacket => { opcode: Int, blockNum: Int, data: Int };
 AsDATA(_packet) == VariantGetUnsafe("DATA", _packet)
 
-\* @type: (Int, Str) => $tftpPacket;
-ERROR(_errorCode, _msg) ==
-  Variant("ERROR", [opcode |-> OPCODE_ERROR, errorCode |-> _errorCode, msg |-> _msg])
+\* @type: (Int) => $tftpPacket;
+ERROR(_errorCode) ==
+  Variant("ERROR", [opcode |-> OPCODE_ERROR, errorCode |-> _errorCode])
 
 \* @type: $tftpPacket => Bool;
 IsERROR(_packet) == VariantTag(_packet) = "ERROR"
 
-\* @type: $tftpPacket => { opcode: Int, errorCode: Int, msg: Str };
+\* @type: $tftpPacket => { opcode: Int, errorCode: Int };
 AsERROR(_packet) == VariantGetUnsafe("ERROR", _packet)
 
 \* Constructor for UDP packet

@@ -45,7 +45,8 @@ VARIABLES
 \* The set of TFTP options introduced in RFCs 2348-2349
 OPTIONS_RFC2349 == {"blksize", "tsize", "timeout"}
 
-\* Error codes as per RFC 1350 and RFC 2347
+\* Error codes as per RFC 1350 and RFC 2347.
+\* We do not use the actual error messages in the spec, as they differ in practice.
 ALL_ERRORS ==
     SetAsFun({
         <<0, "Not defined">>,
@@ -205,7 +206,7 @@ _ServerSendErrorOnRrq(_rrq, _clientIpAndPort, _rcvdPacket) ==
         LET errorPacket == [
                 srcIp |-> SERVER_IP, srcPort |-> 69,
                 destIp |-> _clientIpAndPort[1], destPort |-> _clientIpAndPort[2],
-                payload |-> ERROR(errorCode, ALL_ERRORS[errorCode])
+                payload |-> ERROR(errorCode)
             ]
         IN
         /\  packets' = packets \union {errorPacket}
@@ -290,7 +291,7 @@ ClientRecvOACK(_udp) ==
                     srcPort |-> _udp.destPort,
                     destIp |-> _udp.srcIp,
                     destPort |-> _udp.srcPort,
-                    payload |-> ERROR(8, ALL_ERRORS[8])
+                    payload |-> ERROR(8)
                 ] IN
                 \* send the ERROR packet and close the connection
                 /\  packets' = packets \union { errorPacket }
