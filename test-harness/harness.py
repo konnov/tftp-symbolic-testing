@@ -501,7 +501,57 @@ class TftpTestHarness:
                     operation['command'] = 'recv_send'
                     operation['rcvd_packet'] = rcvd_packet
                     operation['sent_packet'] = sent_packet
-                    # TODO: Send appropriate command to Docker client based on packet types
+
+                    # Determine the specific recv/send operation based on packet types
+                    rcvd_payload_type = type(rcvd_packet.payload).__name__ if hasattr(rcvd_packet, 'payload') and rcvd_packet.payload else None
+                    sent_payload_type = type(sent_packet.payload).__name__ if hasattr(sent_packet, 'payload') and sent_packet.payload else None
+                    
+                    self.log.info(f"  Received payload type: {rcvd_payload_type}")
+                    self.log.info(f"  Sent payload type: {sent_payload_type}")
+
+                    # Handle OACK received → ACK sent (client acknowledges option negotiation)
+                    if rcvd_payload_type == 'OACK' and sent_payload_type == 'ACK':
+                        self.log.info("  → Client receives OACK and sends ACK")
+                        
+                        if self.docker:
+                            # Extract packet details
+                            src_ip = sent_packet.srcIp
+                            src_port = sent_packet.srcPort
+                            dest_port = sent_packet.destPort
+                            ack_payload = sent_packet.payload
+                            
+                            # Extract ACK block number
+                            block_num = ack_payload.blockNum
+                            
+                            # Build ACK command for Docker client
+                            command = {
+                                'type': 'ack',
+                                'block_num': block_num,
+                                'dest_port': dest_port,
+                                'source_port': src_port
+                            }
+                            
+                            self.log.info(f"  Sending ACK command to client: {command}")
+                            response = self.docker.send_command_to_client(src_ip, command)
+                            
+                            if response:
+                                operation['response'] = response
+                                self.log.info(f"  ACK response: {response}")
+                                
+                                # If we received a packet in response (e.g., DATA), construct it for validation
+                                if 'opcode' in response and 'error' not in response:
+                                    expected_packet = self._construct_expected_packet(response)
+                                    operation['packet_from_server'] = expected_packet
+                                    operation['packet_to_server'] = sent_packet
+                                    self.log.info(f"  Expected packet from server: {expected_packet}")
+                            else:
+                                self.log.warning("  No response from Docker client")
+                        else:
+                            self.log.warning("  Docker manager not initialized, skipping actual operation")
+                    else:
+                        # TODO: Handle other recv/send combinations (DATA→ACK, etc.)
+                        self.log.warning(f"  Unhandled recv/send combination: {rcvd_payload_type} → {sent_payload_type}")
+
 
                 elif action_tag == 'ActionRecvClose':
                     rcvd_packet = last_action.rcvd
