@@ -611,6 +611,55 @@ class TftpTestHarness:
                         else:
                             self.log.warning("  Docker manager not initialized, skipping actual operation")
 
+                    # Handle DATA received → ACK sent (client acknowledges data block)
+                    elif rcvd_payload_type == 'DATA' and sent_payload_type == 'ACK':
+                        self.log.info("  → Client receives DATA and sends ACK")
+                        
+                        if self.docker:
+                            # Extract packet details
+                            src_ip = sent_packet.srcIp
+                            src_port = sent_packet.srcPort
+                            dest_port = sent_packet.destPort
+                            ack_payload = sent_packet.payload
+                            
+                            # Extract ACK block number
+                            block_num = ack_payload.blockNum
+                            
+                            # Build ACK command for Docker client
+                            command = {
+                                'type': 'ack',
+                                'block_num': block_num,
+                                'dest_port': dest_port,
+                                'source_port': src_port
+                            }
+                            
+                            self.log.info(f"  Sending ACK command to client: {command}")
+                            response = self.docker.send_command_to_client(src_ip, command)
+                            
+                            if response:
+                                operation['response'] = response
+                                
+                                # Check if we got a timeout
+                                if response.get('timeout'):
+                                    self.log.warning(f"  ⏱ Timeout waiting for server response after ACK")
+                                    self.log.info(f"  This may be normal if all data blocks received")
+                                    # Don't set packet_from_server - there's nothing to validate
+                                elif 'error' in response:
+                                    self.log.error(f"  ✗ Error from Docker client: {response['error']}")
+                                elif 'opcode' in response:
+                                    # We received another packet (e.g., next DATA block)
+                                    self.log.info(f"  ✓ ACK response: {response}")
+                                    expected_packet = self._construct_expected_packet(response)
+                                    operation['packet_from_server'] = expected_packet
+                                    operation['packet_to_server'] = sent_packet
+                                    self.log.info(f"  Expected packet from server: {expected_packet}")
+                                else:
+                                    self.log.warning(f"  Unexpected response format: {response}")
+                            else:
+                                self.log.warning("  No response from Docker client")
+                        else:
+                            self.log.warning("  Docker manager not initialized, skipping actual operation")
+                    
                     else:
                         # TODO: Handle other recv/send combinations (DATA→ACK, etc.)
                         self.log.warning(f"  Unhandled recv/send combination: {rcvd_payload_type} → {sent_payload_type}")
