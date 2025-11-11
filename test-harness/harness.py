@@ -36,6 +36,19 @@ from client import (
 from docker_manager import DockerManager
 from server import ApalacheServer
 
+# Error messages as per RFC 1350 and RFC 2347
+ERROR_MESSAGES = {
+    0: "Not defined",
+    1: "File not found",
+    2: "Access violation",
+    3: "Disk full or allocation exceeded",
+    4: "Illegal TFTP operation",
+    5: "Unknown transfer ID",
+    6: "File already exists",
+    7: "No such user",
+    8: "Option negotiation failed"
+}
+
 
 # Variant type dataclasses for TLA+ types
 # Class names must match variant tags exactly (required by itf-py)
@@ -407,8 +420,8 @@ class TftpTestHarness:
                 state_index = current_state.meta.get('index', '?')
                 state_values = current_state.values
 
-                self.log.info(f"Current state index: {state_index}")
-                self.log.info(f"Current state keys: {state_values.keys()}")
+                self.log.debug(f"Current state index: {state_index}")
+                self.log.debug(f"Current state keys: {state_values.keys()}")
 
                 # Extract lastAction from the state
                 last_action = state_values.get('lastAction')
@@ -419,8 +432,8 @@ class TftpTestHarness:
                 # With itf-py 0.4.1+, variants are decoded as typed namedtuples
                 # The type name is the tag (e.g., 'ActionInit', 'ActionClientSendRRQ')
                 action_tag = type(last_action).__name__
-                self.log.info(f"lastAction type: {action_tag}")
-                self.log.info(f"lastAction fields: {last_action._fields if hasattr(last_action, '_fields') else 'N/A'}")
+                self.log.debug(f"lastAction type: {action_tag}")
+                self.log.debug(f"lastAction fields: {last_action._fields if hasattr(last_action, '_fields') else 'N/A'}")
 
                 # Determine the TFTP operation based on the action tag
                 operation = {
@@ -495,24 +508,24 @@ class TftpTestHarness:
                     # Determine the specific recv/send operation based on packet types
                     rcvd_payload_type = type(rcvd_packet.payload).__name__ if hasattr(rcvd_packet, 'payload') and rcvd_packet.payload else None
                     sent_payload_type = type(sent_packet.payload).__name__ if hasattr(sent_packet, 'payload') and sent_packet.payload else None
-                    
+
                     self.log.info(f"  Received payload type: {rcvd_payload_type}")
                     self.log.info(f"  Sent payload type: {sent_payload_type}")
 
                     # Handle OACK received → ACK sent (client acknowledges option negotiation)
                     if rcvd_payload_type == 'OACK' and sent_payload_type == 'ACK':
                         self.log.info("  → Client receives OACK and sends ACK")
-                        
+
                         if self.docker:
                             # Extract packet details
                             src_ip = sent_packet.srcIp
                             src_port = sent_packet.srcPort
                             dest_port = sent_packet.destPort
                             ack_payload = sent_packet.payload
-                            
+
                             # Extract ACK block number
                             block_num = ack_payload.blockNum
-                            
+
                             # Build ACK command for Docker client
                             command = {
                                 'type': 'ack',
@@ -520,24 +533,84 @@ class TftpTestHarness:
                                 'dest_port': dest_port,
                                 'source_port': src_port
                             }
-                            
+
                             self.log.info(f"  Sending ACK command to client: {command}")
                             response = self.docker.send_command_to_client(src_ip, command)
-                            
+
                             if response:
                                 operation['response'] = response
-                                self.log.info(f"  ACK response: {response}")
-                                
-                                # If we received a packet in response (e.g., DATA), construct it for validation
-                                if 'opcode' in response and 'error' not in response:
+
+                                # Check if we got a timeout
+                                if response.get('timeout'):
+                                    self.log.warning(f"  ⏱ Timeout waiting for server response after ACK")
+                                    self.log.warning(f"  Server did not send DATA packet - connection may be closed")
+                                    # Don't set packet_from_server - there's nothing to validate
+                                elif 'error' in response:
+                                    self.log.error(f"  ✗ Error from Docker client: {response['error']}")
+                                elif 'opcode' in response:
+                                    # We received a packet in response (e.g., DATA)
+                                    self.log.info(f"  ✓ ACK response: {response}")
                                     expected_packet = self._construct_expected_packet(response)
                                     operation['packet_from_server'] = expected_packet
                                     operation['packet_to_server'] = sent_packet
                                     self.log.info(f"  Expected packet from server: {expected_packet}")
+                                else:
+                                    self.log.warning(f"  Unexpected response format: {response}")
                             else:
                                 self.log.warning("  No response from Docker client")
                         else:
                             self.log.warning("  Docker manager not initialized, skipping actual operation")
+
+                    # Handle OACK received → ERROR sent (client rejects option negotiation)
+                    elif rcvd_payload_type == 'OACK' and sent_payload_type == 'ERROR':
+                        self.log.info("  → Client receives OACK and sends ERROR")
+
+                        if self.docker:
+                            # Extract packet details
+                            src_ip = sent_packet.srcIp
+                            src_port = sent_packet.srcPort
+                            dest_port = sent_packet.destPort
+                            error_payload = sent_packet.payload
+
+                            # Extract ERROR details
+                            error_code = error_payload.errorCode
+                            error_msg = ERROR_MESSAGES.get(error_code, f"Error code {error_code}")
+
+                            # Build ERROR command for Docker client
+                            command = {
+                                'type': 'error',
+                                'error_code': error_code,
+                                'error_msg': error_msg,
+                                'dest_port': dest_port,
+                                'source_port': src_port
+                            }
+
+                            self.log.info(f"  Sending ERROR command to client: {command}")
+                            response = self.docker.send_command_to_client(src_ip, command)
+
+                            if response:
+                                operation['response'] = response
+
+                                # Check response status
+                                if response.get('status') == 'error_sent':
+                                    self.log.info(f"  ✓ ERROR sent successfully (code={error_code})")
+                                    # ERROR packets don't expect a response - connection is closed
+                                elif 'error' in response:
+                                    self.log.error(f"  ✗ Error from Docker client: {response['error']}")
+                                elif 'opcode' in response:
+                                    # Unexpected: server sent a response to ERROR
+                                    self.log.warning(f"  ⚠ Unexpected response to ERROR: {response}")
+                                    expected_packet = self._construct_expected_packet(response)
+                                    operation['packet_from_server'] = expected_packet
+                                    operation['packet_to_server'] = sent_packet
+                                    self.log.info(f"  Unexpected packet from server: {expected_packet}")
+                                else:
+                                    self.log.warning(f"  Unexpected response format: {response}")
+                            else:
+                                self.log.warning("  No response from Docker client")
+                        else:
+                            self.log.warning("  Docker manager not initialized, skipping actual operation")
+
                     else:
                         # TODO: Handle other recv/send combinations (DATA→ACK, etc.)
                         self.log.warning(f"  Unhandled recv/send combination: {rcvd_payload_type} → {sent_payload_type}")

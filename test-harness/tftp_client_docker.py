@@ -106,6 +106,21 @@ class TftpClient:
         """Encode an ACK packet."""
         return struct.pack("!HH", OPCODE_ACK, block_num)
 
+    def encode_error(self, error_code: int, error_msg: str) -> bytes:
+        """
+        Encode an ERROR packet.
+        
+        Args:
+            error_code: TFTP error code (0-7)
+            error_msg: Error message string
+            
+        Returns:
+            Encoded ERROR packet
+        """
+        # ERROR packet format: opcode(2) | error_code(2) | error_msg(string) | 0
+        error_msg_bytes = error_msg.encode('utf-8')
+        return struct.pack("!HH", OPCODE_ERROR, error_code) + error_msg_bytes + b'\x00'
+
     def decode_packet(self, data: bytes) -> Dict[str, Any]:
         """
         Decode a TFTP packet.
@@ -281,6 +296,59 @@ class TftpClient:
         finally:
             sock.close()
 
+    def send_error(self, error_code: int, error_msg: str, dest_port: int, source_port: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Send an ERROR packet.
+
+        Args:
+            error_code: TFTP error code (0-7)
+            error_msg: Error message
+            dest_port: Server port to send to
+            source_port: Client source port
+
+        Returns:
+            Response information
+        """
+        self.log.info(f"Sending ERROR (code={error_code}, msg={error_msg})")
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(DEFAULT_TIMEOUT)
+
+        try:
+            if source_port:
+                sock.bind((self.client_ip, source_port))
+            else:
+                sock.bind((self.client_ip, 0))
+
+            actual_port = sock.getsockname()[1]
+            self.log.info(f"Using source port: {actual_port}")
+
+            error_packet = self.encode_error(error_code, error_msg)
+            sock.sendto(error_packet, (self.server_ip, dest_port))
+            self.log.info(f"Sent ERROR to {self.server_ip}:{dest_port}")
+
+            # ERROR packets typically don't expect a response
+            # But we'll try to receive in case the server sends something
+            try:
+                sock.settimeout(1.0)  # Short timeout for error responses
+                data, addr = sock.recvfrom(65536)
+                response = self.decode_packet(data)
+                response['src_ip'] = addr[0]
+                response['src_port'] = addr[1]
+                response['dest_ip'] = self.client_ip
+                response['dest_port'] = actual_port
+                return response
+            except socket.timeout:
+                # No response expected - this is normal for ERROR packets
+                return {'status': 'error_sent', 'error_code': error_code, 'error_msg': error_msg}
+
+        except Exception as e:
+            self.log.error(f"Error sending ERROR packet: {e}")
+            return {'error': str(e)}
+
+        finally:
+            sock.close()
+
     def handle_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle a command from the harness.
@@ -310,6 +378,19 @@ class TftpClient:
                 return {'error': 'Missing required fields: block_num or dest_port'}
             return self.send_ack(
                 block_num=block_num,
+                dest_port=dest_port,
+                source_port=command.get('source_port')
+            )
+
+        elif cmd_type == 'error':
+            error_code = command.get('error_code')
+            error_msg = command.get('error_msg', '')
+            dest_port = command.get('dest_port')
+            if error_code is None or dest_port is None:
+                return {'error': 'Missing required fields: error_code or dest_port'}
+            return self.send_error(
+                error_code=error_code,
+                error_msg=error_msg,
                 dest_port=dest_port,
                 source_port=command.get('source_port')
             )
