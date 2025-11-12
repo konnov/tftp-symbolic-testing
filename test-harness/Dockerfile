@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y \
     iproute2 \
     iputils-ping \
     net-tools \
+    tcpdump \
+    coreutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Create TFTP root directory
@@ -36,13 +38,56 @@ set -e\n\
 \n\
 # Docker Compose already assigns the IP via ipv4_address, no manual configuration needed\n\
 \n\
-# Start TFTP server in background\n\
-in.tftpd -L --foreground --address ${SERVER_IP}:69 \\\n\
-  --user nobody --port-range ${PORT_RANGE} \\\n\
-  --secure /var/tftp &\n\
+# Watchdog function to monitor TFTP server\n\
+run_tftpd_with_watchdog() {\n\
+  local restart_count=0\n\
+  local max_restarts=1\n\
+  \n\
+  while [ $restart_count -lt $max_restarts ]; do\n\
+    echo "Starting TFTP server (attempt $((restart_count + 1))/$max_restarts)"\n\
+    echo "Command: in.tftpd -vv --foreground --address ${SERVER_IP}:69 --user nobody --port-range ${PORT_RANGE} --secure /var/tftp"\n\
+    \n\
+    # Start tcpdump in background to capture TFTP traffic\n\
+    # Simplified filter: just capture all UDP traffic\n\
+    tcpdump -i any -n -s 0 -vv udp 2>&1 &\n\
+    TCPDUMP_PID=$!\n\
+    echo "Started tcpdump with PID $TCPDUMP_PID"\n\
+    \n\
+    # Start TFTP server in foreground with verbose logging\n\
+    # Using stdbuf to disable buffering so we see output immediately\n\
+    # Redirect both stdout and stderr to ensure we capture everything\n\
+    exec 2>&1\n\
+    stdbuf -oL -eL in.tftpd -vv --foreground --address ${SERVER_IP}:69 \\\n\
+      --user nobody --port-range ${PORT_RANGE} \\\n\
+      --secure /var/tftp\n\
+    \n\
+    exit_code=$?\n\
+    timestamp=$(date "+%Y-%m-%d %H:%M:%S")\n\
+    \n\
+    if [ $exit_code -eq 0 ]; then\n\
+      echo "[$timestamp] TFTP server exited normally with code 0"\n\
+      break\n\
+    else\n\
+      echo "[$timestamp] !!! TFTP SERVER CRASHED !!!"\n\
+      echo "[$timestamp] Exit code: $exit_code"\n\
+      echo "[$timestamp] Signal: $((exit_code - 128))"\n\
+      restart_count=$((restart_count + 1))\n\
+      \n\
+      if [ $restart_count -lt $max_restarts ]; then\n\
+        echo "[$timestamp] Restarting TFTP server in 2 seconds..."\n\
+        sleep 2\n\
+      else\n\
+        echo "[$timestamp] Maximum restart attempts reached. Giving up."\n\
+        return $exit_code\n\
+      fi\n\
+    fi\n\
+  done\n\
+}\n\
 \n\
+# Start TFTP server with watchdog in background\n\
+run_tftpd_with_watchdog &\n\
 TFTPD_PID=$!\n\
-echo "TFTP server started with PID $TFTPD_PID"\n\
+echo "TFTP server watchdog started with PID $TFTPD_PID"\n\
 \n\
 # Start client control server if CLIENT_IP is set\n\
 if [ -n "${CLIENT_IP}" ]; then\n\

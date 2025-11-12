@@ -229,6 +229,23 @@ class DockerManager:
             self.log.error(f"Error communicating with client: {e}")
             return None
 
+    def get_server_logs(self) -> str:
+        """Get the logs from the TFTP server container."""
+        try:
+            result = subprocess.run(
+                ["docker", "logs", "tftp-server"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return result.stdout + result.stderr
+        except subprocess.CalledProcessError as e:
+            self.log.error(f"Failed to get server logs: {e.stderr}")
+            return f"Error retrieving server logs: {e.stderr}"
+        except Exception as e:
+            self.log.error(f"Unexpected error getting server logs: {e}")
+            return f"Error retrieving server logs: {e}"
+
     def stop_server(self):
         """Stop the TFTP server container."""
         try:
