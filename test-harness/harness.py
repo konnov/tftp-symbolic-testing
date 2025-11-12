@@ -291,6 +291,9 @@ class TftpTestHarness:
         Returns:
             List of action label strings
         """
+        if "timeout_occurred" in operation and operation["timeout_occurred"]:
+            return ['ServerTimeout']
+
         # Check if operation has an expected_packet
         if not operation or 'packet_from_server' not in operation:
             return []
@@ -555,7 +558,9 @@ class TftpTestHarness:
                                 if response.get('timeout'):
                                     self.log.warning(f"  ⏱ Timeout waiting for server response after ACK")
                                     self.log.warning(f"  Server did not send DATA packet - connection may be closed")
-                                    # Don't set packet_from_server - there's nothing to validate
+                                    # Mark this as a timeout operation so turn switches to SUT
+                                    # This allows the server timeout transition to be explored
+                                    operation['timeout_occurred'] = True
                                 elif 'error' in response:
                                     self.log.error(f"  ✗ Error from Docker client: {response['error']}")
                                 elif 'opcode' in response:
@@ -654,7 +659,8 @@ class TftpTestHarness:
                                 if response.get('timeout'):
                                     self.log.warning(f"  ⏱ Timeout waiting for server response after ACK")
                                     self.log.info(f"  This may be normal if all data blocks received")
-                                    # Don't set packet_from_server - there's nothing to validate
+                                    # Mark this as a timeout operation so turn switches to SUT
+                                    operation['timeout_occurred'] = True
                                 elif 'error' in response:
                                     self.log.error(f"  ✗ Error from Docker client: {response['error']}")
                                 elif 'opcode' in response:
@@ -978,34 +984,48 @@ class TftpTestHarness:
                                 # We have received feedback from the SUT.
                                 # Plan its evaluation for the next iteration.
                                 turn = SUT
+                            elif operation.get('timeout_occurred'):
+                                # A timeout occurred - switch to SUT turn to allow
+                                # server timeout transitions to be explored
+                                self.log.info("  Switching to SUT turn to handle timeout")
+                                turn = SUT
                     else:
                         if not operation:
                             self.log.error("No operation to validate on SUT turn")
                             return False
 
-                        # Create the variant using module-level dataclass
-                        expected_last_action = ActionRecvSend(
-                            rcvd=operation['packet_to_server'],
-                            sent=operation['packet_from_server']
-                        )
-                        self.log.info(f"Assume lastAction: {expected_last_action}")
-                        # Assume that lastAction equals the reconstructed action
-                        equalities = {
-                            "lastAction": value_to_json(expected_last_action)
-                        }
-                        assume_result = self.client.assume_state(equalities, check_enabled=True)
-                        if isinstance(assume_result, AssumptionEnabled):
-                            self.log.info("✓ Received packet matches the spec")
+                        # Check if this is a timeout operation
+                        if operation.get('timeout_occurred'):
+                            # For timeout, we don't validate a packet - just switch back to TESTER
+                            # The spec should have executed a timeout transition
+                            self.log.info("  Timeout handled, switching back to TESTER turn")
                             turn = TESTER
                             operation = None
-                        elif isinstance(assume_result, AssumptionDisabled):
-                            self.log.warning("✗ Received packet does NOT match the spec - test diverged!")
-                            # Test found a discrepancy - this is valuable!
-                            # Continue to save at the end of the run
-                            error_found = True
-                            break
                         else:
-                            self.log.warning("? Unable to validate received packet")
+                            # Normal case: validate the received packet
+                            # Create the variant using module-level dataclass
+                            expected_last_action = ActionRecvSend(
+                                rcvd=operation['packet_to_server'],
+                                sent=operation['packet_from_server']
+                            )
+                            self.log.info(f"Assume lastAction: {expected_last_action}")
+                            # Assume that lastAction equals the reconstructed action
+                            equalities = {
+                                "lastAction": value_to_json(expected_last_action)
+                            }
+                            assume_result = self.client.assume_state(equalities, check_enabled=True)
+                            if isinstance(assume_result, AssumptionEnabled):
+                                self.log.info("✓ Received packet matches the spec")
+                                turn = TESTER
+                                operation = None
+                            elif isinstance(assume_result, AssumptionDisabled):
+                                self.log.warning("✗ Received packet does NOT match the spec - test diverged!")
+                                # Test found a discrepancy - this is valuable!
+                                # Continue to save at the end of the run
+                                error_found = True
+                                break
+                            else:
+                                self.log.warning("? Unable to validate received packet")
 
             if not enabled_found:
                 self.log.warning(f"✗ Could not find enabled transition for turn '{turn}' - ending test run")
