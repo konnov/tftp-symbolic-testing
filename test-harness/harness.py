@@ -766,6 +766,10 @@ class TftpTestHarness:
                 data = {f: default(getattr(obj, f)) for f in obj._fields} # type: ignore
                 return {"tag": tag, **data}
 
+            # --- Regular tuples (e.g., <<Str, Int>> for ipPort) ---
+            if isinstance(obj, tuple):
+                return [default(item) for item in obj]
+
             # --- itf-py ImmutableList (including UdpPacket tuples) ---
             if type(obj).__name__ == 'ImmutableList':
                 # Special case: 5-element list is a UdpPacket tuple
