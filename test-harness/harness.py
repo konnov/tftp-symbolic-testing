@@ -703,7 +703,12 @@ class TftpTestHarness:
                     self.log.info(f"Action: Advance Clock by {delta}")
                     operation['command'] = 'advance_clock'
                     operation['delta'] = delta
-                    # TODO: Sleep or advance time in the test environment
+
+                    # Sleep for the specified duration to simulate time passing.
+                    # TODO: It would be nicer to have clock manipulation in the SUT directly.
+                    self.log.info(f"  Sleeping for {delta} seconds to advance clock...")
+                    time.sleep(delta)
+                    self.log.info(f"  ✓ Clock advanced by {delta} seconds")
 
                 else:
                     self.log.warning(f"Unknown action tag: {action_tag}")
