@@ -968,13 +968,12 @@ class TftpTestHarness:
                         self.client.rollback(snapshot_before)
                         self.current_snapshot = snapshot_before
                 else:
-                    enabled_found = True
-                    self.current_transitions.append(next_trans)
-
                     # Move to next step in Apalache
                     self.current_snapshot = self.client.next_step()
 
                     if turn == TESTER:
+                        enabled_found = True
+                        self.current_transitions.append(next_trans)
                         # Execute the corresponding TFTP operation
                         operation = self.execute_tftp_operation(next_trans["index"])
                         if operation:
@@ -1001,6 +1000,8 @@ class TftpTestHarness:
                             self.log.info("  Timeout handled, switching back to TESTER turn")
                             turn = TESTER
                             operation = None
+                            enabled_found = True
+                            self.current_transitions.append(next_trans)
                         else:
                             # Normal case: validate the received packet
                             # Create the variant using module-level dataclass
@@ -1018,17 +1019,30 @@ class TftpTestHarness:
                                 self.log.info("✓ Received packet matches the spec")
                                 turn = TESTER
                                 operation = None
+                                enabled_found = True
+                                self.current_transitions.append(next_trans)
                             elif isinstance(assume_result, AssumptionDisabled):
-                                self.log.warning("✗ Received packet does NOT match the spec - test diverged!")
                                 # Test found a discrepancy - this is valuable!
-                                # Continue to save at the end of the run
-                                error_found = True
-                                break
+                                # However, we may have several SUT actions to try.
+                                # Hence, do not break the loop yet.
+                                # If we do not find a corresponding transition,
+                                # we will break out by enabled_found = False.
+                                # Transition was disabled, rollback and try another
+                                enabled_found = False
+                                if snapshot_before is not None:
+                                    self.log.info(f"Rollback to snapshot {snapshot_before}")
+                                    self.client.rollback(snapshot_before)
+                                    self.current_snapshot = snapshot_before
                             else:
                                 self.log.warning("? Unable to validate received packet")
+                                error_found = True
+                                break
 
             if not enabled_found:
-                self.log.warning(f"✗ Could not find enabled transition for turn '{turn}' - ending test run")
+                if turn == SUT:
+                    self.log.warning("✗ Last SUT operation does NOT match the spec - test diverged!")
+                else:
+                    self.log.warning(f"✗ Could not find enabled transition for tester - ending test run")
                 break
 
         # Save the test run
