@@ -831,6 +831,13 @@ class TftpTestHarness:
             with open(server_logs_file, 'w') as f:
                 f.write(server_logs)
             self.log.info(f"TFTP server logs saved to {server_logs_file}")
+            
+            # Save syslog from the server container
+            syslog_file = run_dir / "tftpd_syslog.log"
+            syslog_content = self.docker.get_syslog()
+            with open(syslog_file, 'w') as f:
+                f.write(syslog_content)
+            self.log.info(f"TFTP server syslog saved to {syslog_file}")
 
         self.log.info(f"Test run {self.test_run_number} saved to {run_dir}")
 

@@ -246,6 +246,23 @@ class DockerManager:
             self.log.error(f"Unexpected error getting server logs: {e}")
             return f"Error retrieving server logs: {e}"
 
+    def get_syslog(self) -> str:
+        """Get the syslog from the TFTP server container."""
+        try:
+            result = subprocess.run(
+                ["docker", "exec", "tftp-server", "cat", "/var/log/syslog"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return result.stdout
+        except subprocess.CalledProcessError as e:
+            self.log.error(f"Failed to get syslog: {e.stderr}")
+            return f"Error retrieving syslog: {e.stderr}"
+        except Exception as e:
+            self.log.error(f"Unexpected error getting syslog: {e}")
+            return f"Error retrieving syslog: {e}"
+
     def stop_server(self):
         """Stop the TFTP server container."""
         try:

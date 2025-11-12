@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     net-tools \
     tcpdump \
     coreutils \
+    rsyslog \
     && rm -rf /var/lib/apt/lists/*
 
 # Create TFTP root directory
@@ -43,15 +44,24 @@ run_tftpd_with_watchdog() {\n\
   local restart_count=0\n\
   local max_restarts=1\n\
   \n\
+  # Start rsyslog to capture syslog messages\n\
+  rsyslogd\n\
+  echo "Started rsyslog daemon"\n\
+  \n\
   while [ $restart_count -lt $max_restarts ]; do\n\
     echo "Starting TFTP server (attempt $((restart_count + 1))/$max_restarts)"\n\
-    echo "Command: in.tftpd -vv --foreground --address ${SERVER_IP}:69 --user nobody --port-range ${PORT_RANGE} --secure /var/tftp"\n\
+    echo "Command: in.tftpd -vvv --foreground --address ${SERVER_IP}:69 --user nobody --port-range ${PORT_RANGE} --secure /var/tftp"\n\
     \n\
     # Start tcpdump in background to capture TFTP traffic\n\
-    # Simplified filter: just capture all UDP traffic\n\
-    tcpdump -i any -n -s 0 -vv udp 2>&1 &\n\
+    # -l: Line buffered output (immediate output per line)\n\
+    # -U: Packet buffered output (don't wait for buffer to fill)\n\
+    # -i any: Capture on all interfaces\n\
+    # -n: Don't resolve addresses\n\
+    # -s 0: Capture full packets\n\
+    # -vv: Very verbose\n\
+    stdbuf -oL -eL tcpdump -l -U -i any -n -s 0 -vv udp 2>&1 &\n\
     TCPDUMP_PID=$!\n\
-    echo "Started tcpdump with PID $TCPDUMP_PID"\n\
+    echo "Started tcpdump with PID $TCPDUMP_PID (unbuffered output)"\n\
     \n\
     # Start TFTP server in foreground with verbose logging\n\
     # Using stdbuf to disable buffering so we see output immediately\n\
