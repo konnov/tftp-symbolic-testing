@@ -162,6 +162,9 @@ class TftpTestHarness:
         self.log = logging.getLogger(__name__)
         self.log.info(f"Test harness initialized. Logging to {log_file}")
 
+        # Keep track of per-run log handlers for cleanup
+        self.run_log_handlers = []
+
     def start_apalache(self, hostname: str = "localhost", port: int = 8822):
         """Start the Apalache server."""
         self.log.info("Starting Apalache server...")
@@ -200,6 +203,14 @@ class TftpTestHarness:
         if self.docker:
             self.log.info("Cleaning up Docker environment...")
             self.docker.cleanup()
+
+        # Clean up any remaining log handlers
+        if hasattr(self, 'run_log_handlers'):
+            root_logger = logging.getLogger()
+            for handler in self.run_log_handlers:
+                root_logger.removeHandler(handler)
+                handler.close()
+            self.run_log_handlers.clear()
 
     def _construct_expected_packet(self, response: Dict[str, Any]) -> Any:
         """
@@ -746,6 +757,19 @@ class TftpTestHarness:
         run_dir = self.output_dir / f"run_{self.test_run_number:04d}"
         run_dir.mkdir(parents=True, exist_ok=True)
 
+        # Add a file handler for this specific test run
+        run_log_file = run_dir / "python_harness.log"
+        run_handler = logging.FileHandler(run_log_file)
+        run_handler.setLevel(logging.INFO)
+        run_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+        # Get the root logger and add the handler
+        root_logger = logging.getLogger()
+        root_logger.addHandler(run_handler)
+        self.run_log_handlers.append(run_handler)
+
+        self.log.info(f"=== Starting test run {self.test_run_number} ===")
+
         # Save transitions
         transitions_file = run_dir / "transitions.txt"
         with open(transitions_file, 'w') as f:
@@ -831,7 +855,7 @@ class TftpTestHarness:
             with open(server_logs_file, 'w') as f:
                 f.write(server_logs)
             self.log.info(f"TFTP server logs saved to {server_logs_file}")
-            
+
             # Save syslog from the server container
             syslog_file = run_dir / "tftpd_syslog.log"
             syslog_content = self.docker.get_syslog()
@@ -839,7 +863,14 @@ class TftpTestHarness:
                 f.write(syslog_content)
             self.log.info(f"TFTP server syslog saved to {syslog_file}")
 
-        self.log.info(f"Test run {self.test_run_number} saved to {run_dir}")
+        self.log.info(f"=== Test run {self.test_run_number} completed and saved to {run_dir} ===")
+
+        # Remove the run-specific log handler and close it
+        if self.run_log_handlers:
+            handler = self.run_log_handlers.pop()
+            root_logger = logging.getLogger()
+            root_logger.removeHandler(handler)
+            handler.close()
 
         # Reset for next run
         self.current_transitions = []
