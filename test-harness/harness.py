@@ -1086,8 +1086,8 @@ def main():
     parser = argparse.ArgumentParser(description='TFTP Test Harness - Symbolic Testing')
     parser.add_argument('--docker', action='store_true',
                         help='Enable Docker for actual TFTP operations')
-    parser.add_argument('--tests', type=int, default=3,
-                        help='Number of test runs to generate (default: 3)')
+    parser.add_argument('--tests', type=int, default=10,
+                        help='Number of test runs to generate (default: 10)')
     parser.add_argument('--steps', type=int, default=100,
                         help='Maximum steps per test run (default: 100)')
     args = parser.parse_args()
