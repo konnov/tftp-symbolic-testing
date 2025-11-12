@@ -753,22 +753,8 @@ class TftpTestHarness:
 
     def save_test_run(self):
         """Save the current test run to disk."""
-        self.test_run_number += 1
+        # Note: test_run_number is already incremented and run_dir created in generate_test_run()
         run_dir = self.output_dir / f"run_{self.test_run_number:04d}"
-        run_dir.mkdir(parents=True, exist_ok=True)
-
-        # Add a file handler for this specific test run
-        run_log_file = run_dir / "python_harness.log"
-        run_handler = logging.FileHandler(run_log_file)
-        run_handler.setLevel(logging.INFO)
-        run_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-
-        # Get the root logger and add the handler
-        root_logger = logging.getLogger()
-        root_logger.addHandler(run_handler)
-        self.run_log_handlers.append(run_handler)
-
-        self.log.info(f"=== Starting test run {self.test_run_number} ===")
 
         # Save transitions
         transitions_file = run_dir / "transitions.txt"
@@ -890,7 +876,24 @@ class TftpTestHarness:
         if not self.client or not self.spec_params:
             raise RuntimeError("Client or spec_params not initialized")
 
-        self.log.info(f"=== Starting test run generation (max {max_steps} steps) ===")
+        # Set up logging for this test run
+        # Increment run number and create directory
+        self.test_run_number += 1
+        run_dir = self.output_dir / f"run_{self.test_run_number:04d}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        # Add a file handler for this specific test run
+        run_log_file = run_dir / "python_harness.log"
+        run_handler = logging.FileHandler(run_log_file)
+        run_handler.setLevel(logging.INFO)
+        run_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+        # Get the root logger and add the handler
+        root_logger = logging.getLogger()
+        root_logger.addHandler(run_handler)
+        self.run_log_handlers.append(run_handler)
+
+        self.log.info(f"=== Starting test run generation {self.test_run_number} (max {max_steps} steps) ===")
 
         # Initialize with a random init transition
         # TODO: In this case, there is only one init transition,
