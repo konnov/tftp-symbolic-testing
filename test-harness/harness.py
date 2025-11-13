@@ -1010,6 +1010,8 @@ class TftpTestHarness:
                         # receive a packet from the server (which may have been sent already!).
                         self.log.warning("✗ Last SUT timeout does NOT match the spec - continue")
                         stop_test = False # continue the test
+                        turn = TESTER
+                        last_sut_feedback = None
                     else:
                         self.log.warning("✗ Last SUT operation does NOT match the spec - test diverged!")
                         stop_test = True
