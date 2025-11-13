@@ -360,7 +360,7 @@ def parse_log_file(log_file: str) -> List[Dict[str, Any]]:
             # Look for specification mismatches
             # Skip "Transition X: DISABLED" and "Transition X is DISABLED" messages as they're noise
             # Distinguish between timeout-related mismatches (continue) and divergences (test stopped)
-            elif ('✗' in message or 'does NOT match' in message or 'DISABLED' in message) and not re.search(r'Transition \d+\s*(is |: )DISABLED', message):
+            elif ('✗' in message or 'does NOT match' in message) and not re.search(r'Transition \d+\s*(is |: )DISABLED', message):
                 # Check if this is a timeout-related mismatch that allows continuation
                 if 'SUT timeout does NOT match' in message and 'continue' in message:
                     entries.append({'entry_type': 'timeout_mismatch', 'message': message})
