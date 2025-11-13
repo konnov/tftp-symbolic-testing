@@ -28,7 +28,10 @@ OPCODE_OACK = 6
 
 # Default TFTP parameters
 DEFAULT_BLKSIZE = 512
-DEFAULT_TIMEOUT = 5
+
+# The timeout we are using for socket operations.
+# Since TFTP is using UDP, we do not wait for response too long.
+SOCKET_TIMEOUT = 1
 
 
 class TftpClient:
@@ -205,7 +208,7 @@ class TftpClient:
 
         # Create UDP socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(DEFAULT_TIMEOUT)
+        sock.settimeout(SOCKET_TIMEOUT)
 
         try:
             # Bind to specific port if requested
@@ -262,7 +265,7 @@ class TftpClient:
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # TODO: use the negotiated timeout if available
-        sock.settimeout(DEFAULT_TIMEOUT)
+        sock.settimeout(SOCKET_TIMEOUT)
 
         try:
             if source_port:
@@ -312,7 +315,7 @@ class TftpClient:
         self.log.info(f"Sending ERROR (code={error_code}, msg={error_msg})")
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(DEFAULT_TIMEOUT)
+        sock.settimeout(SOCKET_TIMEOUT)
 
         try:
             if source_port:

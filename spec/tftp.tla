@@ -46,7 +46,8 @@ VARIABLES
 OPTIONS_RFC2349 == {"blksize", "tsize", "timeout"}
 
 \* Error codes as per RFC 1350 and RFC 2347.
-\* We do not use the actual error messages in the spec, as they differ in practice.
+\* We do not use the actual error messages in the spec,
+\* as the implementations produce various messages.
 ALL_ERRORS ==
     SetAsFun({
         <<0, "Not defined">>,
@@ -249,7 +250,8 @@ ClientRecvOACK(_udp) ==
     /\  ipPort \in DOMAIN clientTransfers
     /\  LET oack == AsOACK(_udp.payload)
             transfer == clientTransfers[ipPort]
-            \* update the transfer state on the client side
+            \* Update the transfer state on the client side,
+            \* unless it sends an ERROR
             newTransfer ==
                 [ transfer EXCEPT
                     !.port = _udp.srcPort,

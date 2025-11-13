@@ -281,7 +281,7 @@ class TftpTestHarness:
 
         return expected
 
-    def _labels_from_operation(self, operation: Dict[str, Any]) -> List[str]:
+    def _spec_labels_from_operation(self, operation: Dict[str, Any]) -> List[str]:
         """
         Generate the list of action labels that match the expected packet
         from an operation returned by `execute_tftp_operation`.
@@ -292,7 +292,8 @@ class TftpTestHarness:
             List of action label strings
         """
         if "timeout_occurred" in operation and operation["timeout_occurred"]:
-            return ['ServerTimeout']
+            # Let the protocol spec match the timeout.
+            return [ 'ServerTimeout' ]
 
         # Check if operation has an expected_packet
         if not operation or 'packet_from_server' not in operation:
@@ -370,7 +371,7 @@ class TftpTestHarness:
 
         return True
 
-    def try_transition(self, transition: Dict['str', Any]) -> bool:
+    def try_spec_transition(self, transition: Dict['str', Any]) -> bool:
         """
         Try to assume a transition and check if it's enabled.
 
@@ -399,14 +400,9 @@ class TftpTestHarness:
             self.log.warning(f"Transition {transition_id} status is UNKNOWN")
             return False
 
-    def execute_tftp_operation(self, transition_id: int) -> Optional[Dict[str, Any]]:
+    def execute_sut_operation(self, transition_id: int) -> Optional[Dict[str, Any]]:
         """
-        Execute the TFTP operation corresponding to the transition.
-
-        This is a placeholder that would need to:
-        1. Decode the transition to determine the TFTP operation
-        2. Send commands to the Docker client
-        3. Collect the response from the TFTP server
+        Execute the TFTP operation corresponding to the transition in SUT.
 
         Args:
             transition_id: The transition that was enabled
@@ -733,39 +729,6 @@ class TftpTestHarness:
             self.log.error(f"Error querying transition details: {e}", exc_info=True)
             return None
 
-    def push_constraints_to_apalache(self, udp_packet: Dict[str, Any]) -> bool:
-        """
-        Push constraints from the UDP packet to Apalache via assumeState.
-
-        Args:
-            udp_packet: The UDP packet received from the TFTP server
-
-        Returns:
-            True if constraints are satisfied (ENABLED), False if DISABLED
-        """
-        if not self.client:
-            raise RuntimeError("Client not initialized")
-
-        self.log.info("Pushing UDP packet constraints to Apalache...")
-
-        # TODO: Convert UDP packet to equality constraints
-        # This needs to extract fields from the packet and create
-        # equalities that match the TLA+ specification format
-
-        equalities = {}  # Placeholder
-
-        result = self.client.assume_state(equalities, check_enabled=True)
-
-        if isinstance(result, AssumptionEnabled):
-            self.log.info("Constraints are satisfied (ENABLED)")
-            return True
-        elif isinstance(result, AssumptionDisabled):
-            self.log.info("Constraints violated (DISABLED)")
-            return False
-        else:
-            self.log.warning("Constraint status is UNKNOWN")
-            return False
-
     def save_test_run(self):
         """Save the current test run to disk."""
         # Note: test_run_number is already incremented and run_dir created in generate_test_run()
@@ -921,7 +884,7 @@ class TftpTestHarness:
         init_trans = random.choice(init_transitions)
         self.log.debug(f"Selected init transition: {init_trans}")
 
-        if not self.try_transition(init_trans):
+        if not self.try_spec_transition(init_trans):
             self.log.error("Init transition is not enabled")
             return False
 
@@ -933,11 +896,11 @@ class TftpTestHarness:
         # Main exploration loop
         next_transitions = self.spec_params['next']
 
-        turn = TESTER   # Track whose turn it is: tester or SUT
-        operation = None   # the last operation executed (from tester side)
-        error_found = False
+        turn = TESTER               # Track whose turn it is: tester or SUT.
+        last_sut_feedback = None    # The last operation received from SUT.
+        stop_test = False           # Something went wrong, stop the test?
         for step in range(max_steps):
-            if error_found:
+            if stop_test:
                 break
 
             self.log.info(f"\n--- Step {step + 1}/{max_steps} ---")
@@ -950,13 +913,12 @@ class TftpTestHarness:
                     if frozenset(trans.get("labels")).intersection(TESTER_ACTION_LABELS)
                 ]
             else:
-                op_labels = self._labels_from_operation(operation) if operation else []
-                print(f"Operation labels for SUT turn: {op_labels}")
+                op_labels = self._spec_labels_from_operation(last_sut_feedback) if last_sut_feedback else []
                 transitions_to_try = [ trans for trans in next_transitions \
                     if any(label in op_labels for label in trans.get("labels", []))
                 ]
 
-            while len(transitions_to_try) > 0 and not enabled_found and not error_found:
+            while len(transitions_to_try) > 0 and not enabled_found and not stop_test:
                 # Select a random next transition from the transitions we have not tried yet
                 next_trans = random.choice(transitions_to_try)
                 transitions_to_try.remove(next_trans)
@@ -965,7 +927,7 @@ class TftpTestHarness:
                 snapshot_before = self.current_snapshot
 
                 # Try the transition in Apalache
-                if not self.try_transition(next_trans):
+                if not self.try_spec_transition(next_trans):
                     # Transition was disabled, rollback and try another
                     if snapshot_before is not None:
                         self.log.info(f"Rollback to snapshot {snapshot_before}")
@@ -979,39 +941,39 @@ class TftpTestHarness:
                         enabled_found = True
                         self.current_transitions.append(next_trans)
                         # Execute the corresponding TFTP operation
-                        operation = self.execute_tftp_operation(next_trans["index"])
-                        if operation:
-                            self.command_log.append(operation)
+                        last_sut_feedback = self.execute_sut_operation(next_trans["index"])
+                        if last_sut_feedback:
+                            self.command_log.append(last_sut_feedback)
 
-                            if 'packet_from_server' in operation:
+                            if 'packet_from_server' in last_sut_feedback:
                                 # We have received feedback from the SUT.
                                 # Plan its evaluation for the next iteration.
                                 turn = SUT
-                            elif operation.get('timeout_occurred'):
+                            elif last_sut_feedback.get('timeout_occurred'):
                                 # A timeout occurred - switch to SUT turn to allow
                                 # server timeout transitions to be explored
                                 self.log.info("  Switching to SUT turn to handle timeout")
                                 turn = SUT
                     else:
-                        if not operation:
+                        if not last_sut_feedback:
                             self.log.error("No operation to validate on SUT turn")
                             return False
 
                         # Check if this is a timeout operation
-                        if operation.get('timeout_occurred'):
+                        if last_sut_feedback.get('timeout_occurred'):
                             # For timeout, we don't validate a packet - just switch back to TESTER
                             # The spec should have executed a timeout transition
                             self.log.info("  Timeout handled, switching back to TESTER turn")
                             turn = TESTER
-                            operation = None
+                            last_sut_feedback = None
                             enabled_found = True
                             self.current_transitions.append(next_trans)
                         else:
                             # Normal case: validate the received packet
                             # Create the variant using module-level dataclass
                             expected_last_action = ActionRecvSend(
-                                rcvd=operation['packet_to_server'],
-                                sent=operation['packet_from_server']
+                                rcvd=last_sut_feedback['packet_to_server'],
+                                sent=last_sut_feedback['packet_from_server']
                             )
                             self.log.info(f"Assume lastAction: {expected_last_action}")
                             # Assume that lastAction equals the reconstructed action
@@ -1022,7 +984,7 @@ class TftpTestHarness:
                             if isinstance(assume_result, AssumptionEnabled):
                                 self.log.info("✓ Received packet matches the spec")
                                 turn = TESTER
-                                operation = None
+                                last_sut_feedback = None
                                 enabled_found = True
                                 self.current_transitions.append(next_trans)
                             elif isinstance(assume_result, AssumptionDisabled):
@@ -1031,15 +993,15 @@ class TftpTestHarness:
                                 # Hence, do not break the loop yet.
                                 # If we do not find a corresponding transition,
                                 # we will break out by enabled_found = False.
-                                # Transition was disabled, rollback and try another
                                 enabled_found = False
+                                # Transition was disabled, rollback and try another
                                 if snapshot_before is not None:
                                     self.log.info(f"Rollback to snapshot {snapshot_before}")
                                     self.client.rollback(snapshot_before)
                                     self.current_snapshot = snapshot_before
                             else:
                                 self.log.warning("? Unable to validate received packet")
-                                error_found = True
+                                stop_test = True
                                 break
 
             if not enabled_found:
