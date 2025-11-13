@@ -987,6 +987,8 @@ class TftpTestHarness:
                                 last_sut_feedback = None
                                 enabled_found = True
                                 self.current_transitions.append(next_trans)
+                                # save the current snapshot to remember the decision!
+                                self.current_snapshot = assume_result.snapshot_id
                             elif isinstance(assume_result, AssumptionDisabled):
                                 # Test found a discrepancy - this is valuable!
                                 # However, we may have several SUT actions to try.
