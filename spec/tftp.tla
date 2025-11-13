@@ -418,8 +418,6 @@ ServerResendDATA(_udp) ==
         LET ack == AsACK(_udp.payload)
             data == AsDATA(dataPacket.payload)
             transfer == serverTransfers[ipPort]
-            \* update the timestamp of the last transfer
-            newTransfer == [ transfer EXCEPT !.timestamp = clock ]
         IN
         \* make sure that we receive from the correct port
         /\ _udp.destPort = transfer.port
@@ -431,8 +429,8 @@ ServerResendDATA(_udp) ==
         /\ dataPacket.destPort = _udp.srcPort
         \* do not receive packets if the connection must timeout
         /\ clock <= transfer.timestamp + transfer.timeout
-        \* either we have more data to send, or we send exactly 0 bytes in the last block
-        /\ serverTransfers' = [ serverTransfers EXCEPT ![ipPort] = newTransfer ]
+        \* only update the timestamp
+        /\ serverTransfers' = [ serverTransfers EXCEPT ![ipPort].timestamp = clock ]
         /\ lastAction' = ActionRecvSend(_udp, dataPacket)
     /\ UNCHANGED <<packets, clientTransfers, clock>>
 
