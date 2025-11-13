@@ -213,7 +213,7 @@ class TftpTestHarness:
         if not trace_data:
             return None
 
-        trace_json, trace = trace_data
+        _, trace = trace_data
         self.log.info(f"Retrieved trace with {len(trace.states)} states")
 
         if not trace.states:
@@ -477,7 +477,7 @@ class TftpTestHarness:
             self.log.warning(f"Transition {transition_id} status is UNKNOWN")
             return False
 
-    def execute_sut_operation(self, transition_id: int) -> Optional[Dict[str, Any]]:
+    def execute_sut_operation(self, transition_id: int, last_action: Any) -> Optional[Dict[str, Any]]:
         """
         Execute the TFTP operation corresponding to the transition in SUT.
 
@@ -487,17 +487,10 @@ class TftpTestHarness:
         Returns:
             Dictionary containing the operation details and response
         """
-        if not self.client:
-            raise RuntimeError("Client not initialized")
-
         self.log.info(f"Executing TFTP operation for transition {transition_id}")
 
         # Query Apalache for the transition details using TRACE
         try:
-            last_action = self.get_last_action()
-            if last_action is None:
-                return None
-
             # With itf-py 0.4.1+, variants are decoded as typed namedtuples
             # The type name is the tag (e.g., 'ActionInit', 'ActionClientSendRRQ')
             action_tag = type(last_action).__name__
@@ -994,19 +987,22 @@ class TftpTestHarness:
                         enabled_found = True
                         self.current_transitions.append(next_trans)
                         # Execute the corresponding TFTP operation
-                        last_sut_feedback = self.execute_sut_operation(next_trans["index"])
-                        if last_sut_feedback:
-                            self.command_log.append(last_sut_feedback)
+                        last_action = self.get_last_action()
+                        if last_action:
+                            last_sut_feedback = \
+                                self.execute_sut_operation(next_trans["index"], last_action)
+                            if last_sut_feedback:
+                                self.command_log.append(last_sut_feedback)
 
-                            if 'packet_from_server' in last_sut_feedback:
-                                # We have received feedback from the SUT.
-                                # Plan its evaluation for the next iteration.
-                                turn = SUT
-                            elif last_sut_feedback.get('timeout_occurred'):
-                                # A timeout occurred - switch to SUT turn to allow
-                                # server timeout transitions to be explored
-                                self.log.info("  Switching to SUT turn to handle timeout")
-                                turn = SUT
+                                if 'packet_from_server' in last_sut_feedback:
+                                    # We have received feedback from the SUT.
+                                    # Plan its evaluation for the next iteration.
+                                    turn = SUT
+                                elif last_sut_feedback.get('timeout_occurred'):
+                                    # A timeout occurred - switch to SUT turn to allow
+                                    # server timeout transitions to be explored
+                                    self.log.info("  Switching to SUT turn to handle timeout")
+                                    turn = SUT
                     else:
                         if not last_sut_feedback:
                             self.log.error("No operation to validate on SUT turn")
