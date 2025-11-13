@@ -20,28 +20,31 @@ from urllib3.util.retry import Retry
 @dataclass
 class TransitionDisabled:
     trans_id: int
+    snapshot_id: int
 
 @dataclass
 class TransitionEnabled:
     trans_id: int
+    snapshot_id: int
 
 @dataclass
 class TransitionUnknown:
     trans_id: int
+    snapshot_id: int
 
 EnabledStatus = Union[TransitionEnabled, TransitionDisabled, TransitionUnknown]
 
 @dataclass
 class AssumptionDisabled:
-    pass
+    snapshot_id: int
 
 @dataclass
 class AssumptionEnabled:
-    pass
+    snapshot_id: int
 
 @dataclass
 class AssumptionUnknown:
-    pass
+    snapshot_id: int
 
 AssumptionStatus = Union[AssumptionEnabled, AssumptionDisabled, AssumptionUnknown]
 
@@ -301,20 +304,21 @@ class JsonRpcClient:
 
         response = self._rpc_call("assumeTransition", params)
         status = response["status"]
+        snapshot_id = response["snapshotId"]
 
         if status == "ENABLED":
             self._info(f"Transition {transition_id}: ENABLED")
-            return TransitionEnabled(transition_id)
+            return TransitionEnabled(transition_id, snapshot_id)
         elif status == "DISABLED":
             self._info(f"Transition {transition_id}: DISABLED")
-            return TransitionDisabled(transition_id)
+            return TransitionDisabled(transition_id, snapshot_id)
         else:  # UNKNOWN
             if check_enabled:
                 self._error(f"Transition {transition_id}: UNKNOWN")
-                return TransitionUnknown(transition_id)
+                return TransitionUnknown(transition_id, snapshot_id)
             else:
                 # assume it's enabled for exploration
-                return TransitionEnabled(transition_id)
+                return TransitionEnabled(transition_id, snapshot_id)
 
     def assume_state(self, equalities: Dict[str, Any], check_enabled = True) -> AssumptionStatus:
         """Assume that the provided equalities hold true and check whether they are enabled."""
@@ -327,20 +331,21 @@ class JsonRpcClient:
 
         response = self._rpc_call("assumeState", params)
         status = response["status"]
+        snapshot_id = response["snapshotId"]
 
         if status == "ENABLED":
             self._info(f"AssumeState: ENABLED")
-            return AssumptionEnabled()
+            return AssumptionEnabled(snapshot_id)
         elif status == "DISABLED":
             self._info(f"AssumeState: DISABLED")
-            return AssumptionDisabled()
+            return AssumptionDisabled(snapshot_id)
         else:  # UNKNOWN
             if check_enabled:
                 self._error(f"AssumeState: UNKNOWN")
-                return AssumptionUnknown()
+                return AssumptionUnknown(snapshot_id)
             else:
                 # assume it's enabled for exploration
-                return AssumptionEnabled()
+                return AssumptionEnabled(snapshot_id)
 
     def next_step(self) -> int:
         """Move to the next step."""
