@@ -314,7 +314,7 @@ class TftpTestHarness:
             return []
 
         if tag == 'DATA':
-            return ['ServerRecvRRQthenSendData', 'ServerSendDATA']
+            return ['ServerRecvRRQthenSendData', 'ServerSendDATA', 'ServerResendDATA']
         elif tag == 'OACK':
             return ['ServerRecvRRQthenSendOack']
         elif tag == 'ERROR':

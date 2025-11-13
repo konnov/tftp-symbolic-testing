@@ -403,6 +403,37 @@ ServerSendDATA(_udp) ==
         /\ lastAction' = ActionRecvSend(_udp, dataPacket)
     /\ UNCHANGED <<clientTransfers, clock>>
 
+\* The server receives an ACK packet and resends DATA that it sent in the past.
+\* This is to fix the mismatch found by the test harness.
+\* @type: $udpPacket => Bool;
+ServerResendDATA(_udp) ==
+    ServerResendDATA::
+    LET ipPort == <<_udp.srcIp, _udp.srcPort>> IN
+    /\ IsACK(_udp.payload)
+    /\ _udp.destIp = SERVER_IP
+    /\ ipPort \in DOMAIN serverTransfers
+    /\  \E dataPacket \in packets:
+        LET ack == AsACK(_udp.payload)
+            data == AsDATA(dataPacket.payload)
+            transfer == serverTransfers[ipPort]
+            \* update the timestamp of the last transfer
+            newTransfer == [ transfer EXCEPT !.timestamp = clock ]
+        IN
+        \* make sure that we receive from the correct port
+        /\ _udp.destPort = transfer.port
+        \* The DATA packet is sent in response to the ACK.
+        /\ ack.blockNum + 1 = data.blockNum
+        /\ dataPacket.srcIp = SERVER_IP
+        /\ dataPacket.srcPort = _udp.destPort
+        /\ dataPacket.destIp = _udp.srcIp
+        /\ dataPacket.destPort = _udp.srcPort
+        \* do not receive packets if the connection must timeout
+        /\ clock <= transfer.timestamp + transfer.timeout
+        \* either we have more data to send, or we send exactly 0 bytes in the last block
+        /\ serverTransfers' = [ serverTransfers EXCEPT ![ipPort] = newTransfer ]
+        /\ lastAction' = ActionRecvSend(_udp, dataPacket)
+    /\ UNCHANGED <<packets, clientTransfers, clock>>
+
 \* The server receives an ACK packet and closes the connection (RRQ transfer).
 \* @type: $udpPacket => Bool;
 ServerRecvAckAndCloseConn(_udp) ==
@@ -532,6 +563,7 @@ Next ==
     \/  \E udp \in packets:
             \/ ServerRecvRRQ(udp)
             \/ ServerSendDATA(udp)
+            \/ ServerResendDATA(udp)
             \/ ServerRecvAckAndCloseConn(udp)
             \/ ServerRecvErrorAndCloseConn(udp)
     \/  \E ipPort \in DOMAIN serverTransfers:

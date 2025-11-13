@@ -359,8 +359,15 @@ def parse_log_file(log_file: str) -> List[Dict[str, Any]]:
 
             # Look for specification mismatches
             # Skip "Transition X: DISABLED" and "Transition X is DISABLED" messages as they're noise
+            # Distinguish between timeout-related mismatches (continue) and divergences (test stopped)
             elif ('✗' in message or 'does NOT match' in message or 'DISABLED' in message) and not re.search(r'Transition \d+\s*(is |: )DISABLED', message):
-                entries.append({'entry_type': 'spec_mismatch', 'message': message})
+                # Check if this is a timeout-related mismatch that allows continuation
+                if 'SUT timeout does NOT match' in message and 'continue' in message:
+                    entries.append({'entry_type': 'timeout_mismatch', 'message': message})
+                elif 'test diverged' in message or 'ending test run' in message:
+                    entries.append({'entry_type': 'test_diverged', 'message': message})
+                else:
+                    entries.append({'entry_type': 'spec_mismatch', 'message': message})
 
             # Skip successful spec matches - only show mismatches
             # elif '✓' in message and ('matches' in message.lower() or 'enabled' in message.lower()):
@@ -555,6 +562,20 @@ def generate_mermaid_diagram(entries: List[Dict[str, Any]]) -> str:
                 # Extract timeout details if possible
                 clean_msg = message.replace('⏱', '').strip()
                 lines.append(f"    Note over {first_participant},{last_participant}: ⏱ {clean_msg}")
+
+        elif entry_type == 'timeout_mismatch':
+            # Timeout-related spec mismatch that allows test to continue
+            message = entry.get('message', '')
+            if first_participant and last_participant:
+                clean_msg = message.replace('✗', '').strip()
+                lines.append(f"    Note over {first_participant},{last_participant}: ⚠️ {clean_msg}")
+
+        elif entry_type == 'test_diverged':
+            # Test diverged or ended - critical mismatch
+            message = entry.get('message', '')
+            if first_participant and last_participant:
+                clean_msg = message.replace('✗', '').strip()
+                lines.append(f"    Note over {first_participant},{last_participant}: ❌ {clean_msg}")
 
         elif entry_type == 'spec_mismatch':
             message = entry.get('message', '')
