@@ -189,8 +189,16 @@ def parse_log_file(log_file: str) -> List[Dict[str, Any]]:
 
             message = parts[1].strip()
 
-            # Look for packet information
-            if 'Received packet:' in message or 'Sent packet:' in message or 'Expected packet' in message:
+            # Skip "Assume lastAction" messages first - they contain packet structures but are internal
+            if 'Assume lastAction' in message:
+                pass  # Skip this message entirely
+
+            # Skip "Expected packet" messages - they're for validation, redundant with "Received packet"
+            elif 'Expected packet' in message:
+                pass  # Skip this message
+
+            # Look for packet information (Received/Sent packets from spec trace)
+            elif 'Received packet:' in message or 'Sent packet:' in message:
                 # Extract packet from the message
                 packet_data = parse_namedtuple_packet(message)
                 if packet_data:
@@ -199,8 +207,6 @@ def parse_log_file(log_file: str) -> List[Dict[str, Any]]:
                         packet_data['direction'] = 'received'
                     elif 'Sent packet:' in message:
                         packet_data['direction'] = 'sent'
-                    else:
-                        packet_data['direction'] = 'expected'
 
                     packet_data['entry_type'] = 'packet'
                     entries.append(packet_data)
@@ -292,13 +298,50 @@ def parse_log_file(log_file: str) -> List[Dict[str, Any]]:
             elif 'Trying transition' in message:
                 pass  # Skip this message
 
-            # Skip "Assume lastAction" messages - they're internal to symbolic execution
-            elif 'Assume lastAction' in message:
-                pass  # Skip this message
-
-            # Skip "Received response" messages - they're redundant with packet entries
-            elif 'Received response:' in message or 'response:' in message:
-                pass  # Skip this message
+            # Parse "Received response" messages from Docker - these are SUT responses
+            # Format: Received response: {'opcode': 6, 'opcode_name': 'OACK', 'options': {...}, 'src_ip': ..., 'src_port': ..., 'dest_ip': ..., 'dest_port': ...}
+            elif 'Received response:' in message:
+                try:
+                    # Extract the JSON dictionary
+                    json_match = re.search(r'Received response:\s*(\{.*\})', message)
+                    if json_match:
+                        import json
+                        response = json.loads(json_match.group(1).replace("'", '"'))
+                        
+                        # Build a packet entry from the response
+                        packet_data = {
+                            'srcIp': response.get('src_ip'),
+                            'srcPort': response.get('src_port'),
+                            'destIp': response.get('dest_ip'),
+                            'destPort': response.get('dest_port'),
+                            'direction': 'docker_response',  # Mark as Docker response for dashed arrow
+                            'entry_type': 'packet'
+                        }
+                        
+                        # Parse the opcode and payload
+                        opcode = response.get('opcode')
+                        opcode_name = response.get('opcode_name', 'UNKNOWN')
+                        packet_data['payloadTag'] = opcode_name
+                        packet_data['payload'] = {}
+                        
+                        if opcode_name == 'OACK':
+                            packet_data['payload']['options'] = response.get('options', {})
+                        elif opcode_name == 'DATA':
+                            # Extract block number and data length
+                            if 'block_num' in response:
+                                packet_data['payload']['blockNum'] = response['block_num']
+                            if 'data_length' in response:
+                                packet_data['payload']['data'] = response['data_length']
+                        elif opcode_name == 'ACK':
+                            if 'block_num' in response:
+                                packet_data['payload']['blockNum'] = response['block_num']
+                        elif opcode_name == 'ERROR':
+                            packet_data['payload']['errorCode'] = response.get('error_code', 0)
+                            packet_data['payload']['errorMsg'] = response.get('error_msg', '')
+                        
+                        entries.append(packet_data)
+                except (json.JSONDecodeError, KeyError, AttributeError):
+                    pass  # Skip malformed responses
 
             # Look for timeouts
             elif 'Timeout' in message or 'timeout' in message.lower():
@@ -418,10 +461,10 @@ def generate_mermaid_diagram(entries: List[Dict[str, Any]]) -> str:
         entry_type = entry.get('entry_type')
 
         if entry_type == 'packet':
-            # Show sent, expected, and received packets
-            # Note: We show all to capture the full communication flow
-            # Received packets are important for server->client messages like DATA
-            if entry.get('direction') not in ['sent', 'expected', 'received']:
+            # Show sent, expected, received packets, and docker_response
+            # docker_response = actual SUT responses (dashed arrows)
+            # expected/sent/received = spec packets (solid arrows)
+            if entry.get('direction') not in ['sent', 'expected', 'received', 'docker_response']:
                 continue
 
             src_ip = entry.get('srcIp')
@@ -443,7 +486,9 @@ def generate_mermaid_diagram(entries: List[Dict[str, Any]]) -> str:
             payload = entry.get('payload', {})
             payload_str = format_payload(payload_tag, payload)
 
-            lines.append(f"    {src_id}->>{dest_id}: {payload_str}")
+            # Use dashed arrow for Docker responses, solid for spec packets
+            arrow = '-->>' if entry.get('direction') == 'docker_response' else '->>'
+            lines.append(f"    {src_id}{arrow}{dest_id}: {payload_str}")
 
         elif entry_type == 'command':
             # Show command being sent from client as an arrow
