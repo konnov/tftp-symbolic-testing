@@ -1002,14 +1002,20 @@ class TftpTestHarness:
                             else:
                                 self.log.warning("? Unable to validate received packet")
                                 stop_test = True
-                                break
 
-            if not enabled_found:
+            if not enabled_found and not stop_test:
                 if turn == SUT:
-                    self.log.warning("✗ Last SUT operation does NOT match the spec - test diverged!")
+                    if last_sut_feedback and last_sut_feedback.get('timeout_occurred'):
+                        # FIX #2: even if there was a timeout, a client should have a chance to
+                        # receive a packet from the server (which may have been sent already!).
+                        self.log.warning("✗ Last SUT timeout does NOT match the spec - continue")
+                        stop_test = False # continue the test
+                    else:
+                        self.log.warning("✗ Last SUT operation does NOT match the spec - test diverged!")
+                        stop_test = True
                 else:
                     self.log.warning(f"✗ Could not find enabled transition for tester - ending test run")
-                break
+                    stop_test = True
 
         # Save the test run
         self.save_test_run()
