@@ -207,7 +207,7 @@ _ServerSendErrorOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
     ServerRecvRRQthenSendError::
     \E errorCode \in DOMAIN ALL_ERRORS:
         LET errorPacket == [
-                srcIp |-> SERVER_IP, srcPort |-> 69,
+                srcIp |-> SERVER_IP, srcPort |-> _newServerPort,
                 destIp |-> _clientIpAndPort[1], destPort |-> _clientIpAndPort[2],
                 payload |-> ERROR(errorCode)
             ]
