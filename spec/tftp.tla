@@ -199,8 +199,10 @@ _ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
 \* At this point, we assume that the server can simply error when it wants to.
 \* See ServerRecvRRQ below.
 \* @type: ({ opcode: Int, filename: Str, mode: Str, options: Str -> Int },
-\*           <<Str, Int>>, $udpPacket) => Bool;
-_ServerSendErrorOnRrq(_rrq, _clientIpAndPort, _rcvdPacket) ==
+\*           <<Str, Int>>, Int, $udpPacket) => Bool;
+_ServerSendErrorOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
+    \* FIX #1: the error is sent from a new port, not from 69!
+    \* Found by the test harness.
     ServerRecvRRQthenSendError::
     \E errorCode \in DOMAIN ALL_ERRORS:
         LET errorPacket == [
@@ -232,7 +234,7 @@ ServerRecvRRQ(_udp) ==
             \* According to RFC 2347, the server may respond with DATA or OACK
             /\  \/ _ServerSendDataOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
                 \/ _ServerSendOackOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
-                \/ _ServerSendErrorOnRrq(rrq, clientIpAndPort, _udp)
+                \/ _ServerSendErrorOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
 
 (************************* Receive OACK *******************************)
 

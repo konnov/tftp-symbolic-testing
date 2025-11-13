@@ -499,11 +499,15 @@ class TftpTestHarness:
                             operation['response'] = response
 
                             # Decode response and construct expected packet for TLA+ validation
-                            if 'opcode' in response and 'error' not in response:
+                            # Check for 'opcode' which indicates a valid TFTP packet (including ERROR)
+                            if 'opcode' in response:
                                 expected_packet = self._construct_expected_packet(response)
                                 operation['packet_from_server'] = expected_packet
                                 operation['packet_to_server'] = sent_packet
                                 self.log.info(f"Expected packet for validation: {expected_packet}")
+                            elif 'error' in response:
+                                # Docker client error (not a TFTP ERROR packet)
+                                self.log.error(f"Docker client error: {response['error']}")
                         else:
                             self.log.warning("No response from Docker client")
                     else:
