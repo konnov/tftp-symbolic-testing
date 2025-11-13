@@ -1059,6 +1059,12 @@ class TftpTestHarness:
                     self.client.rollback(self.spec_params['snapshot_id'])
                     self.current_snapshot = self.spec_params['snapshot_id']
 
+                # Reset Docker containers to fresh state (similar to Apalache rollback)
+                if use_docker and self.docker:
+                    if not self.docker.reset_containers():
+                        self.log.error("Failed to reset Docker containers")
+                        return False
+
                 self.generate_test_run(max_steps=max_steps)
 
             self.log.info(f"\n{'='*60}")

@@ -290,6 +290,29 @@ class DockerManager:
         self.client_containers = []
         self.log.info("All clients stopped")
 
+    def reset_containers(self):
+        """Reset containers to a fresh state by stopping and restarting them."""
+        self.log.info("Resetting Docker containers to fresh state...")
+        
+        # Stop all containers
+        self.stop_clients()
+        self.stop_server()
+        
+        # Restart server
+        if not self.start_server():
+            self.log.error("Failed to restart TFTP server")
+            return False
+        
+        # Restart clients
+        for client_ip in self.CLIENT_IPS:
+            container_id = self.start_client(client_ip)
+            if not container_id:
+                self.log.error(f"Failed to restart client {client_ip}")
+                return False
+        
+        self.log.info("Docker containers reset successfully")
+        return True
+
     def cleanup(self):
         """Clean up all Docker resources."""
         self.log.info("Cleaning up Docker resources...")
