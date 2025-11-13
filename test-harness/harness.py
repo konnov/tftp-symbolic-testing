@@ -165,6 +165,20 @@ class TftpTestHarness:
         # Keep track of per-run log handlers for cleanup
         self.run_log_handlers = []
 
+    def get_run_dir(self, run_number: Optional[int] = None) -> Path:
+        """
+        Get the directory path for a test run.
+        
+        Args:
+            run_number: The run number to use. If None, uses self.test_run_number.
+        
+        Returns:
+            Path to the run directory
+        """
+        if run_number is None:
+            run_number = self.test_run_number
+        return self.output_dir / f"run_{run_number:04d}"
+
     def start_apalache(self, hostname: str = "localhost", port: int = 8822):
         """Start the Apalache server."""
         self.log.info("Starting Apalache server...")
@@ -732,7 +746,7 @@ class TftpTestHarness:
     def save_test_run(self):
         """Save the current test run to disk."""
         # Note: test_run_number is already incremented and run_dir created in generate_test_run()
-        run_dir = self.output_dir / f"run_{self.test_run_number:04d}"
+        run_dir = self.get_run_dir()
 
         # Save transitions
         transitions_file = run_dir / "transitions.txt"
@@ -857,7 +871,7 @@ class TftpTestHarness:
         # Set up logging for this test run
         # Increment run number and create directory
         self.test_run_number += 1
-        run_dir = self.output_dir / f"run_{self.test_run_number:04d}"
+        run_dir = self.get_run_dir()
         run_dir.mkdir(parents=True, exist_ok=True)
 
         # Add a file handler for this specific test run
@@ -1016,6 +1030,21 @@ class TftpTestHarness:
                         last_sut_feedback = None
                     else:
                         self.log.warning("✗ Last SUT operation does NOT match the spec - test diverged!")
+                        
+                        # Save the current trace for debugging
+                        try:
+                            trace_result = self.client.query(kinds=["TRACE"])
+                            trace_json = trace_result.get('trace', {})
+                            
+                            # Save trace to file in the current run directory
+                            run_dir = self.get_run_dir()
+                            trace_file = run_dir / "divergence_trace.json"
+                            with open(trace_file, 'w') as f:
+                                json.dump(trace_json, f, indent=2)
+                            self.log.info(f"Saved divergence trace to {trace_file}")
+                        except Exception as e:
+                            self.log.error(f"Failed to save divergence trace: {e}", exc_info=True)
+                        
                         stop_test = True
                 else:
                     self.log.warning(f"✗ Could not find enabled transition for tester - ending test run")
