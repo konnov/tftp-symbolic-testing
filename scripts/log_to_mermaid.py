@@ -21,13 +21,29 @@ def parse_namedtuple_packet(packet_str: str) -> Optional[Dict[str, Any]]:
     """
     Parse a namedtuple packet representation from log output.
     Example: UdpPacket(srcIp='172.20.0.11', srcPort=50000, destIp='172.20.0.10', destPort=69, payload=RRQ(...))
+    Or: Rec(srcIp='172.20.0.11', srcPort=1025, destIp='172.20.0.10', destPort=1026, payload=ACK(...))
     """
-    # Match UdpPacket pattern
-    packet_match = re.search(r"UdpPacket\((.*?)\)(?:\s*$|\s*,)", packet_str)
-    if not packet_match:
+    # Match UdpPacket or Rec pattern - need to handle nested parentheses in payload
+    # Find the start of the packet
+    start_match = re.search(r"(?:UdpPacket|Rec)\(", packet_str)
+    if not start_match:
         return None
-
-    fields_str = packet_match.group(1)
+    
+    # Extract everything between the outer parentheses by counting parens
+    start_pos = start_match.end()
+    paren_count = 1
+    i = start_pos
+    while i < len(packet_str) and paren_count > 0:
+        if packet_str[i] == '(':
+            paren_count += 1
+        elif packet_str[i] == ')':
+            paren_count -= 1
+        i += 1
+    
+    if paren_count != 0:
+        return None
+    
+    fields_str = packet_str[start_pos:i-1]
 
     # Parse fields
     result = {}
@@ -53,7 +69,7 @@ def parse_namedtuple_packet(packet_str: str) -> Optional[Dict[str, Any]]:
         result['destPort'] = int(dest_port_match.group(1))
 
     # Extract payload - this is more complex as it's a nested namedtuple
-    payload_match = re.search(r"payload=(\w+)\((.*?)\)(?:\)|$)", fields_str)
+    payload_match = re.search(r"payload=(\w+)\((.*?)\)", fields_str)
     if payload_match:
         payload_type = payload_match.group(1)
         payload_fields_str = payload_match.group(2)
@@ -183,80 +199,11 @@ def parse_log_file(log_file: str) -> List[Dict[str, Any]]:
                         packet_data['direction'] = 'received'
                     elif 'Sent packet:' in message:
                         packet_data['direction'] = 'sent'
-                        # Skip ACK packets from "Sent packet" logs - we get better info from "Sending ACK command"
-                        if packet_data.get('payloadTag') == 'ACK':
-                            continue
                     else:
                         packet_data['direction'] = 'expected'
 
                     packet_data['entry_type'] = 'packet'
                     entries.append(packet_data)
-
-            # Look for "Sending ACK/ERROR command to client" with port information
-            # We use these instead of "Sent packet" ACKs because they have correct port info
-            elif 'Sending ACK command to client' in message or 'Sending ERROR command to client' in message:
-                # Extract: "Sending ACK command to client: {'type': 'ack', 'block_num': 0, 'dest_port': 1024, 'source_port': 1024}"
-                match = re.search(r'Sending (\w+) command to client: (\{.*)', message)
-                if match:
-                    cmd_type = match.group(1).upper()
-                    command_str = match.group(2)
-
-                    # Extract port information
-                    dest_port_match = re.search(r"'dest_port': (\d+)", command_str)
-                    source_port_match = re.search(r"'source_port': (\d+)", command_str)
-                    block_num_match = re.search(r"'block_num': (\d+)", command_str)
-
-                    if dest_port_match and source_port_match:
-                        dest_port = int(dest_port_match.group(1))
-                        source_port = int(source_port_match.group(1))
-                        block_num = int(block_num_match.group(1)) if block_num_match else None
-
-                        # Default IPs (client to server)
-                        # Find client IP from source port (ephemeral port indicates client)
-                        # Look back through entries to find which client is using this source port
-                        src_ip = None
-                        dest_ip = '172.20.0.10'  # Default server IP
-
-                        for prev_entry in reversed(entries):
-                            if prev_entry.get('entry_type') == 'packet':
-                                # Check if this port was used by a client
-                                if prev_entry.get('destPort') == source_port:
-                                    src_ip = prev_entry.get('destIp')
-                                    break
-                                elif prev_entry.get('srcPort') == source_port:
-                                    src_ip = prev_entry.get('srcIp')
-                                    break
-
-                        # If we couldn't find the client IP, try to extract from recent packets
-                        if not src_ip:
-                            # Look for the most recent packet to/from this source port
-                            for prev_entry in reversed(entries):
-                                if prev_entry.get('entry_type') == 'packet':
-                                    if prev_entry.get('srcPort') == dest_port or prev_entry.get('destPort') == dest_port:
-                                        # Found the server port, get its IP
-                                        if prev_entry.get('srcPort') == dest_port:
-                                            dest_ip = prev_entry.get('srcIp', dest_ip)
-                                            src_ip = prev_entry.get('destIp')
-                                        else:
-                                            dest_ip = prev_entry.get('destIp', dest_ip)
-                                            src_ip = prev_entry.get('srcIp')
-                                        break
-
-                        if src_ip:  # Only create entry if we found the source IP
-                            payload = {}
-                            if block_num is not None:
-                                payload['blockNum'] = block_num
-
-                            entries.append({
-                                'entry_type': 'packet',
-                                'direction': 'sent',
-                                'srcIp': src_ip,
-                                'srcPort': source_port,
-                                'destIp': dest_ip,
-                                'destPort': dest_port,
-                                'payloadTag': cmd_type,
-                                'payload': payload
-                            })
 
             # Look for commands being sent to clients
             # These logs contain the actual TFTP source_port field
