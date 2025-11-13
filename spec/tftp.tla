@@ -175,7 +175,9 @@ _ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
         \* In Read Request packets, a size of "0" is specified in the request
         \* and the size of the file, in octets, is returned in the OACK.
         /\ "tsize" \notin DOMAIN _rrq.options \/ _rrq.options["tsize"] = 0
-        /\  LET oackOptions == mk_options(optionsSubset, blksize, 0, timeout)
+        /\  LET tsize ==
+                    IF "tsize" \in DOMAIN _rrq.options THEN FILES[_rrq.filename] ELSE 0
+                oackOptions == mk_options(optionsSubset, blksize, tsize, timeout)
                 oackPacket == [
                     srcIp |-> SERVER_IP, srcPort |-> _newServerPort,
                     destIp |-> _clientIpAndPort[1], destPort |-> _clientIpAndPort[2],
