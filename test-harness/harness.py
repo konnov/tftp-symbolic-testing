@@ -986,9 +986,20 @@ class TftpTestHarness:
                     if turn == TESTER:
                         enabled_found = True
                         self.current_transitions.append(next_trans)
-                        # Execute the corresponding TFTP operation
+                        # Before executing the SUT operation, recover lastAction
+                        # and save it in the SMT context. This way, we do not diverge
+                        # in the SMT context after executing the SUT operation.
+                        # Otherwise, Z3 may return another model later.
                         last_action = self.get_last_spec_action()
                         if last_action:
+                            equalities = { "lastAction": value_to_json(last_action) }
+                            assume_result = self.client.assume_state(equalities, check_enabled=True)
+                            if not isinstance(assume_result, AssumptionEnabled):
+                                # This is a critical error - we just assumed lastAction from the model!
+                                self.log.error("Failed to assume lastAction before after querying it from the model")
+                                stop_test = True
+                                break
+                            # Execute the corresponding TFTP operation
                             last_sut_feedback = \
                                 self.execute_sut_operation(next_trans["index"], last_action)
                             if last_sut_feedback:
