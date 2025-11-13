@@ -202,7 +202,7 @@ class TftpTestHarness:
             self.log.error(f"Error querying trace: {e}", exc_info=True)
             return None
 
-    def get_last_action(self) -> Optional[Any]:
+    def get_last_spec_action(self) -> Optional[Any]:
         """
         Get the last action from the current trace.
 
@@ -987,7 +987,7 @@ class TftpTestHarness:
                         enabled_found = True
                         self.current_transitions.append(next_trans)
                         # Execute the corresponding TFTP operation
-                        last_action = self.get_last_action()
+                        last_action = self.get_last_spec_action()
                         if last_action:
                             last_sut_feedback = \
                                 self.execute_sut_operation(next_trans["index"], last_action)
