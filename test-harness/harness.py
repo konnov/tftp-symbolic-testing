@@ -472,13 +472,10 @@ class TftpTestHarness:
         result = self.client.assume_transition(transition_id, check_enabled=True)
 
         if isinstance(result, TransitionEnabled):
-            self.log.info(f"Transition {transition_id} is ENABLED")
             return True
         elif isinstance(result, TransitionDisabled):
-            self.log.info(f"Transition {transition_id} is DISABLED")
             return False
         else:
-            self.log.warning(f"Transition {transition_id} status is UNKNOWN")
             return False
 
     def execute_sut_operation(self, transition_id: int, last_spec_action: Any) -> Optional[Dict[str, Any]]:
@@ -492,7 +489,6 @@ class TftpTestHarness:
         Returns:
             Dictionary containing the operation details and response
         """
-        self.log.info(f"Executing TFTP operation for transition {transition_id}")
 
         try:
             # With itf-py 0.4.1+, variants are decoded as typed namedtuples
@@ -509,50 +505,50 @@ class TftpTestHarness:
 
             # Parse the action to determine what TFTP command to send
             if action_tag == 'ActionInit':
-                self.log.info("Action: Initialization")
+                self.log.info("TFTP operation for ActionInit")
                 operation['command'] = 'init'
             elif action_tag == 'ActionClientSendRRQ':
-                    self.log.info("Action: Client sends RRQ")
-                    sent_packet = last_spec_action.sent
-                    operation['command'] = 'send_rrq'
+                self.log.info("TFTP operation for ActionClientSendRRQ")
+                sent_packet = last_spec_action.sent
+                operation['command'] = 'send_rrq'
 
-                    # Send RRQ command to Docker client
-                    if self.docker:
-                        # Extract packet details (itf-py decoded namedtuples)
-                        src_ip = sent_packet.srcIp
-                        src_port = sent_packet.srcPort
-                        dest_port = sent_packet.destPort
-                        payload = sent_packet.payload
+                # Send RRQ command to Docker client
+                if self.docker:
+                    # Extract packet details (itf-py decoded namedtuples)
+                    src_ip = sent_packet.srcIp
+                    src_port = sent_packet.srcPort
+                    dest_port = sent_packet.destPort
+                    payload = sent_packet.payload
 
-                        # Extract RRQ details from payload
-                        # payload is a namedtuple for RRQ variant
-                        payload_data = payload.value if hasattr(payload, 'value') else payload
-                        filename = payload_data.filename
-                        mode = payload_data.mode
-                        options = payload_data.options if hasattr(payload_data, 'options') else {}
+                    # Extract RRQ details from payload
+                    # payload is a namedtuple for RRQ variant
+                    payload_data = payload.value if hasattr(payload, 'value') else payload
+                    filename = payload_data.filename
+                    mode = payload_data.mode
+                    options = payload_data.options if hasattr(payload_data, 'options') else {}
 
-                        # Build command for Docker client
-                        # Note: client expects 'type': 'rrq', not 'action': 'send_rrq'
-                        command = {
-                            'type': 'rrq',
-                            'filename': filename,
-                            'mode': mode,
-                            'options': dict(options) if hasattr(options, 'items') else {},
-                            'source_port': src_port  # Optional: client can use specific source port
-                        }
+                    # Build command for Docker client
+                    # Note: client expects 'type': 'rrq', not 'action': 'send_rrq'
+                    command = {
+                        'type': 'rrq',
+                        'filename': filename,
+                        'mode': mode,
+                        'options': dict(options) if hasattr(options, 'items') else {},
+                        'source_port': src_port  # Optional: client can use specific source port
+                    }
 
-                        response = self.docker.send_command_to_client(src_ip, command)
-                        if response:
-                            if 'error' in response:
-                                # Docker client error (not a TFTP ERROR packet)
-                                self.log.error(f"Docker client error: {response['error']}")
-                        else:
-                            self.log.warning("No response from Docker client")
+                    response = self.docker.send_command_to_client(src_ip, command)
+                    if response:
+                        if 'error' in response:
+                            # Docker client error (not a TFTP ERROR packet)
+                            self.log.error(f"Docker client error: {response['error']}")
                     else:
-                        self.log.warning("Docker manager not initialized, skipping actual TFTP operation")
+                        self.log.warning("No response from Docker client")
+                else:
+                    self.log.warning("Docker manager not initialized, skipping actual TFTP operation")
             elif action_tag == 'ActionRecvSend':
                 sent_packet = last_spec_action.sent
-                self.log.info(f"Action: Receive and Send")
+                self.log.info("TFTP operation for ActionRecvSend")
                 self.log.info(f"  Sent packet: {sent_packet}")
                 operation['command'] = 'recv_send'
                 operation['sent_packet'] = sent_packet
@@ -561,11 +557,9 @@ class TftpTestHarness:
                 sent_payload_type = type(sent_packet.payload).__name__ \
                     if hasattr(sent_packet, 'payload') and sent_packet.payload else None
 
-                self.log.info(f"  Sent payload type: {sent_payload_type}")
-
                 # Handle OACK received → ACK sent (client acknowledges option negotiation)
                 if sent_payload_type == 'ACK':
-                    self.log.info("  → Client sends ACK")
+                    self.log.info("  → Client sends ACK to server")
 
                     if self.docker:
                         # Extract packet details
@@ -597,7 +591,7 @@ class TftpTestHarness:
                         self.log.warning("  Docker manager not initialized, skipping actual operation")
                 # Handle ERROR sent (client rejects option negotiation or sends another error)
                 elif sent_payload_type == 'ERROR':
-                    self.log.info("  → Client sends ERROR")
+                    self.log.info("  → Client sends ERROR to server")
 
                     if self.docker:
                         # Extract packet details
@@ -636,9 +630,11 @@ class TftpTestHarness:
                     self.log.warning(f"  Unhandled send: ... → {sent_payload_type}")
             elif action_tag == 'ActionRecvClose':
                 # This action is handled by the spec and SUT separately
+                self.log.info("No TFTP operation for ActionRecvClose")
                 pass
             elif action_tag == 'ActionServerTimeout':
                 # Server timeout is handled by the spec; no action needed in SUT
+                self.log.info("No TFTP operation for ActionServerTimeout")
                 pass
             elif action_tag == 'ActionAdvanceClock':
                 delta = last_spec_action.delta
@@ -648,7 +644,6 @@ class TftpTestHarness:
 
                 # Sleep for the specified duration to simulate time passing.
                 # TODO: It would be nicer to have clock manipulation in the SUT directly.
-                self.log.info(f"  Sleeping for {delta} seconds to advance clock...")
                 time.sleep(delta)
                 self.log.info(f"  ✓ Clock advanced by {delta} seconds")
             else:
@@ -806,8 +801,6 @@ class TftpTestHarness:
         self.log.info(f"=== Starting test run generation {self.test_run_number} (max {max_steps} steps) ===")
 
         # Initialize with a random init transition
-        # TODO: In this case, there is only one init transition,
-        # in other projects there may be more
         init_transitions = self.spec_params['init']
         if not init_transitions:
             self.log.error("No init transitions available")
@@ -834,7 +827,7 @@ class TftpTestHarness:
             if stop_test:
                 break
 
-            self.log.info(f"\n--- Step {step + 1}/{max_steps} ---")
+            self.log.info(f"--- Step {step + 1}/{max_steps} ---")
             enabled_found = False
 
             # Retrieve the new responses from the docker clients
@@ -865,7 +858,7 @@ class TftpTestHarness:
                     if frozenset(trans.get("labels")).intersection(TESTER_ACTION_LABELS)
                 ]
 
-            self.log.info(f"Turn: {turn}. Transitions to try: {transitions_to_try}")
+            self.log.info(f"Turn: {turn}. {len(transitions_to_try)} transitions to try")
 
             while len(transitions_to_try) > 0 and not enabled_found and not stop_test:
                 # Select a random next transition from the transitions we have not tried yet

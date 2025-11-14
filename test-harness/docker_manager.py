@@ -199,7 +199,7 @@ class DockerManager:
             client_index = self.CLIENT_IPS.index(client_ip)
             host_port = self.CONTROL_PORT + client_index + 1
 
-            self.log.info(f"Sending command to client {client_ip} over {host_port}: {command}")
+            self.log.debug(f"Sending command to tftp_client_docker {client_ip} over {host_port}: {command}")
 
             # Connect to client control port
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -222,7 +222,7 @@ class DockerManager:
 
             sock.close()
 
-            self.log.info(f"Received response: {response}")
+            self.log.debug(f"Received response: {response}")
             return response
 
         except Exception as e:
