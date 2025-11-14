@@ -204,25 +204,30 @@ def parse_log_file(log_file: str) -> List[Dict[str, Any]]:
                 action_match = re.search(r'EXECUTE ACTION:\s*(\w+)\(', message)
                 if action_match:
                     action_tag = action_match.group(1)
-                    is_global = action_tag in ['ActionClientTimeout', 'ActionServerTimeout', 'ActionAdvanceClock']
                     
-                    if is_global:
-                        # For global actions, parse the entire action structure
+                    if action_tag == 'ActionAdvanceClock':
+                        # Clock advance is a global action
                         action_data = {}
                         action_data['payloadTag'] = action_tag
                         action_data['payload'] = {}
                         action_data['entry_type'] = 'global_action'
                         
-                        # Extract specific fields for global actions
-                        if action_tag == 'ActionAdvanceClock':
-                            delta_match = re.search(r'delta=(\d+)', message)
-                            if delta_match:
-                                action_data['payload']['delta'] = int(delta_match.group(1))
-                        elif action_tag in ['ActionClientTimeout', 'ActionServerTimeout']:
-                            # Extract ipPort tuple
-                            ip_port_match = re.search(r"ipPort=\('([^']+)',\s*(\d+)\)", message)
-                            if ip_port_match:
-                                action_data['payload']['ipPort'] = [ip_port_match.group(1), int(ip_port_match.group(2))]
+                        delta_match = re.search(r'delta=(\d+)', message)
+                        if delta_match:
+                            action_data['payload']['delta'] = int(delta_match.group(1))
+                        
+                        entries.append(action_data)
+                    elif action_tag in ['ActionClientTimeout', 'ActionServerTimeout']:
+                        # Timeout actions are self-events for specific participants
+                        action_data = {}
+                        action_data['payloadTag'] = action_tag
+                        action_data['entry_type'] = 'timeout_action'
+                        
+                        # Extract ipPort tuple
+                        ip_port_match = re.search(r"ipPort=\('([^']+)',\s*(\d+)\)", message)
+                        if ip_port_match:
+                            action_data['ip'] = ip_port_match.group(1)
+                            action_data['port'] = int(ip_port_match.group(2))
                         
                         entries.append(action_data)
                     else:
@@ -237,6 +242,19 @@ def parse_log_file(log_file: str) -> List[Dict[str, Any]]:
                                 packet_data['source'] = 'action'
                                 packet_data['direction'] = 'sent'  # Mark as sent so it passes the direction filter
                                 entries.append(packet_data)
+                        else:
+                            # For receive-and-close actions, extract the rcvd=Rec(...) packet
+                            # Look for rcvd=Rec(...) or rcvd=UdpPacket(...)
+                            rcvd_match = re.search(r'rcvd=(Rec|UdpPacket)\(', message)
+                            if rcvd_match:
+                                # Extract the packet starting from "rcvd="
+                                packet_data = parse_namedtuple_packet(message[message.index('rcvd='):])
+                                if packet_data:
+                                    # For ActionRecvClose, treat it as a received packet (arrow from src to dest)
+                                    packet_data['entry_type'] = 'packet'
+                                    packet_data['source'] = 'action'
+                                    packet_data['direction'] = 'received'  # Mark as received
+                                    entries.append(packet_data)
 
             # Look for SUT PACKET entries (packets received from the system under test)
             elif 'SUT PACKET:' in message:
@@ -443,8 +461,19 @@ def generate_mermaid_diagram(entries: List[Dict[str, Any]]) -> str:
                 clean_msg = message.replace('⏱', '').strip()
                 lines.append(f"    Note over {first_participant},{last_participant}: ⏱ {clean_msg}")
 
+        elif entry_type == 'timeout_action':
+            # Handle timeout actions as self-loops for specific participants
+            payload_tag = entry.get('payloadTag', 'UNKNOWN')
+            ip = entry.get('ip')
+            port = entry.get('port')
+            
+            if ip and port is not None:
+                participant_id = participant_map.get((ip, port), get_participant_id(ip, port))
+                timeout_type = 'Client Timeout' if payload_tag == 'ActionClientTimeout' else 'Server Timeout'
+                lines.append(f"    {participant_id}->>{participant_id}: ⏱ {timeout_type}")
+
         elif entry_type == 'global_action':
-            # Handle global actions (timeouts and clock advances) that don't have packet arrows
+            # Handle global actions (clock advances) that don't have packet arrows
             payload_tag = entry.get('payloadTag', 'UNKNOWN')
             payload = entry.get('payload', {})
             
@@ -453,16 +482,6 @@ def generate_mermaid_diagram(entries: List[Dict[str, Any]]) -> str:
                 total_clock += delta
                 if first_participant and last_participant:
                     lines.append(f"    Note over {first_participant},{last_participant}: ⏰ Clock +{delta}s (total: {total_clock}s)")
-            elif payload_tag in ['ActionClientTimeout', 'ActionServerTimeout']:
-                timeout_type = 'Client' if payload_tag == 'ActionClientTimeout' else 'Server'
-                ip_port = payload.get('ipPort', ('?', '?'))
-                if isinstance(ip_port, (list, tuple)) and len(ip_port) >= 2:
-                    ip, port = ip_port[0], ip_port[1]
-                    if first_participant and last_participant:
-                        lines.append(f"    Note over {first_participant},{last_participant}: ⏱ {timeout_type} Timeout @ {ip}:{port}")
-                else:
-                    if first_participant and last_participant:
-                        lines.append(f"    Note over {first_participant},{last_participant}: ⏱ {timeout_type} Timeout")
 
         elif entry_type == 'timeout_mismatch':
             # Timeout-related spec mismatch that allows test to continue
