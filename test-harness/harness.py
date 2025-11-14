@@ -651,15 +651,11 @@ class TftpTestHarness:
                     self.log.warning(f"  Unhandled send: ... → {sent_payload_type}")
             elif action_tag in ['ActionRecvClose', 'ActionServerTimeout']:
                 # This action is handled by the spec and SUT separately
-                event = { 'type': action_tag }
                 self.log.info(f"No TFTP operation for {action_tag}")
-                self.log.info(f"  Event: {event}")
                 pass
             elif action_tag == 'ActionAdvanceClock':
                 delta = last_spec_action.delta
-                event = { 'type': 'advance_clock', 'delta': delta }
                 self.log.info(f"Action: Advance Clock by {delta}")
-                self.log.info(f"  Event: {event}")
                 operation['command'] = 'advance_clock'
                 operation['delta'] = delta
 
