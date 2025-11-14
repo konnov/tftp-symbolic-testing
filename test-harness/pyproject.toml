@@ -11,6 +11,7 @@ python = "^3.13.3"
 requests = "^2.31.0"
 itf-py = "^0.4.3"
 orjson = "^3.11.4"
+frozendict = "^2.4.6"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

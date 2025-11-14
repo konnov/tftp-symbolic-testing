@@ -504,6 +504,19 @@ ClientRecvErrorAndCloseConn(_udp) ==
     /\ lastAction' = ActionRecvClose(_udp)
     /\ UNCHANGED <<packets, serverTransfers, clock>>
 
+(********************* Ignore outdated packets ***************************)
+\* The server sends an outdated packet (after timeout).
+\* @type: $udpPacket => Bool;
+ServerSendOutdated(_udp) ==
+    ServerSendOutdated::
+    LET ipPort == <<_udp.srcIp, _udp.srcPort>> IN
+    /\  _udp.destIp = SERVER_IP
+    /\  ipPort \in DOMAIN serverTransfers =>
+            LET transfer == serverTransfers[ipPort] IN
+            (clock > transfer.timestamp + transfer.timeout)
+    /\ lastAction' = ActionServerSendOutdated(_udp)
+    /\ UNCHANGED <<packets, serverTransfers, clientTransfers, clock>>
+
 (******************************* Time ***********************************)
 
 \* Advance the global clock by some delta in the range [1, 255].
@@ -566,6 +579,7 @@ Next ==
             \/ ServerResendDATA(udp)
             \/ ServerRecvAckAndCloseConn(udp)
             \/ ServerRecvErrorAndCloseConn(udp)
+            \/ ServerSendOutdated(udp)
     \/  \E ipPort \in DOMAIN serverTransfers:
             ServerTimeout(ipPort)
     \* handle the clock and timeouts

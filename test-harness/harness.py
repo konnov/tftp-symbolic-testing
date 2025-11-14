@@ -17,6 +17,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, is_dataclass
 import json
 import logging
+from frozendict import frozendict
 import orjson
 import os
 import random
@@ -55,15 +56,15 @@ ERROR_MESSAGES = {
 # Class names must match variant tags exactly (required by itf-py)
 
 @itf_variant
-@dataclass
+@dataclass(frozen=True)
 class OACK:
     """TFTP OACK (Option Acknowledgment) packet variant."""
     opcode: int
-    options: Dict[str, int]
+    options: frozendict[str, int]
 
 
 @itf_variant
-@dataclass
+@dataclass(frozen=True)
 class DATA:
     """TFTP DATA packet variant."""
     opcode: int
@@ -72,7 +73,7 @@ class DATA:
 
 
 @itf_variant
-@dataclass
+@dataclass(frozen=True)
 class ACK:
     """TFTP ACK (Acknowledgment) packet variant."""
     opcode: int
@@ -80,14 +81,14 @@ class ACK:
 
 
 @itf_variant
-@dataclass
+@dataclass(frozen=True)
 class ERROR:
     """TFTP ERROR packet variant."""
     opcode: int
     errorCode: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class UdpPacket:
     """TFTP UDP Packet structure as defined in the spec."""
     srcIp: str
@@ -98,7 +99,7 @@ class UdpPacket:
 
 
 @itf_variant
-@dataclass
+@dataclass(frozen=True)
 class ActionRecvSend:
     """Action representing receiving and sending packets."""
     sent: Any
@@ -162,7 +163,7 @@ class TftpTestHarness:
         self.transition_log = []
         self.sut_command_log = []
         # The list of feedback replies from SUT to process
-        self.sut_feedback_to_process = []
+        self.sut_feedback_to_process = set()
 
     def setup_logging(self):
         """Configure logging for the harness."""
@@ -340,7 +341,7 @@ class TftpTestHarness:
             # Create payload variant using module-level dataclass
             payload = OACK(
                 opcode=6,
-                options=typed_options
+                options=frozendict(typed_options)
             )
         elif opcode == 3:  # DATA
             # Create payload variant using module-level dataclass
@@ -395,11 +396,12 @@ class TftpTestHarness:
             return []
 
         if tag == 'DATA':
-            return ['ServerRecvRRQthenSendData', 'ServerSendDATA', 'ServerResendDATA']
+            return ['ServerRecvRRQthenSendData', 'ServerSendDATA',
+                    'ServerResendDATA', 'ServerSendOutdated']
         elif tag == 'OACK':
-            return ['ServerRecvRRQthenSendOack']
+            return ['ServerRecvRRQthenSendOack', 'ServerSendOutdated']
         elif tag == 'ERROR':
-            return ['ServerRecvRRQthenSendError']
+            return ['ServerRecvRRQthenSendError', 'ServerSendOutdated']
         # TODO: handle 'ACK' when we deal with WRQ
 
         return []
@@ -619,8 +621,6 @@ class TftpTestHarness:
                         if response:
                             if 'error' in response:
                                 self.log.error(f"  ✗ Error from Docker client: {response['error']}")
-                            else:
-                                self.log.warning(f"  Unexpected response format: {response}")
                         else:
                             self.log.warning("  No response from Docker client")
                     else:
@@ -628,13 +628,9 @@ class TftpTestHarness:
                 else:
                     # TODO: Handle other combinations (DATA→ACK, etc.)
                     self.log.warning(f"  Unhandled send: ... → {sent_payload_type}")
-            elif action_tag == 'ActionRecvClose':
+            elif action_tag in ['ActionRecvClose', 'ActionServerTimeout']:
                 # This action is handled by the spec and SUT separately
-                self.log.info("No TFTP operation for ActionRecvClose")
-                pass
-            elif action_tag == 'ActionServerTimeout':
-                # Server timeout is handled by the spec; no action needed in SUT
-                self.log.info("No TFTP operation for ActionServerTimeout")
+                self.log.info(f"No TFTP operation for {action_tag}")
                 pass
             elif action_tag == 'ActionAdvanceClock':
                 delta = last_spec_action.delta
@@ -840,12 +836,12 @@ class TftpTestHarness:
                             # convert to spec packet format
                             spec_packet = self._spec_packet_from_sut_response(sut_packet)
                             self.log.info(f"Received packet from SUT: {spec_packet}")
-                            self.sut_feedback_to_process.append(spec_packet)
+                            self.sut_feedback_to_process.add(spec_packet)
 
-            if self.sut_feedback_to_process != []:
+            if self.sut_feedback_to_process:
                 # give priority to SUT feedback
                 # TODO: choose randomly!
-                last_sut_feedback = self.sut_feedback_to_process.pop(0)
+                last_sut_feedback = self.sut_feedback_to_process.pop()
                 turn = SUT
                 op_labels = self._spec_labels_from_operation(last_sut_feedback) \
                     if last_sut_feedback else []
