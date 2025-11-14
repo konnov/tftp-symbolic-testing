@@ -38,6 +38,24 @@ from client import (
 from docker_manager import DockerManager
 from server import ApalacheServer
 
+
+class ImmutableDict(frozendict):
+    """A wrapper around frozendict that displays dictionaries as
+    `{k1: v_1, ..., k_n: v_n}`."""
+
+    def __new__(cls, items: Dict[str, Any]) -> Any:
+        return super().__new__(cls, items)
+
+
+ImmutableDict.__str__ = (  # type: ignore
+    dict.__str__
+)  # use the default dict representation in pretty-printing
+
+ImmutableDict.__repr__ = (  # type: ignore
+    dict.__repr__
+)  # use the default dict representation in pretty-printing
+
+
 # Error messages as per RFC 1350 and RFC 2347
 ERROR_MESSAGES = {
     0: "Not defined",
@@ -341,7 +359,7 @@ class TftpTestHarness:
             # Create payload variant using module-level dataclass
             payload = OACK(
                 opcode=6,
-                options=frozendict(typed_options)
+                options=ImmutableDict(typed_options)
             )
         elif opcode == 3:  # DATA
             # Create payload variant using module-level dataclass
@@ -497,6 +515,9 @@ class TftpTestHarness:
             # The type name is the tag (e.g., 'ActionInit', 'ActionClientSendRRQ')
             action_tag = type(last_spec_action).__name__
 
+            # Unified logging for all executed actions
+            self.log.info(f"  EXECUTE ACTION: {last_spec_action}")
+
             # Determine the TFTP operation based on the action tag
             operation = {
                 'transition_id': transition_id,
@@ -630,11 +651,15 @@ class TftpTestHarness:
                     self.log.warning(f"  Unhandled send: ... → {sent_payload_type}")
             elif action_tag in ['ActionRecvClose', 'ActionServerTimeout']:
                 # This action is handled by the spec and SUT separately
+                event = { 'type': action_tag }
                 self.log.info(f"No TFTP operation for {action_tag}")
+                self.log.info(f"  Event: {event}")
                 pass
             elif action_tag == 'ActionAdvanceClock':
                 delta = last_spec_action.delta
+                event = { 'type': 'advance_clock', 'delta': delta }
                 self.log.info(f"Action: Advance Clock by {delta}")
+                self.log.info(f"  Event: {event}")
                 operation['command'] = 'advance_clock'
                 operation['delta'] = delta
 
@@ -836,7 +861,7 @@ class TftpTestHarness:
                         for sut_packet in response.get('packets', []):
                             # convert to spec packet format
                             spec_packet = self._spec_packet_from_sut_response(sut_packet)
-                            self.log.info(f"Received packet from SUT: {spec_packet}")
+                            self.log.info(f"  SUT PACKET: {spec_packet}")
                             self.sut_feedback_to_process.add(spec_packet)
 
             if self.sut_feedback_to_process:
@@ -908,6 +933,7 @@ class TftpTestHarness:
                         }
                         assume_result = self.client.assume_state(equalities, check_enabled=True)
                         if isinstance(assume_result, AssumptionEnabled):
+                            self.log.info(f"  EXECUTE ACTION: {expected_last_action}")
                             self.log.info("✓ Received packet matches the spec")
                             turn = TESTER
                             last_sut_feedback = None

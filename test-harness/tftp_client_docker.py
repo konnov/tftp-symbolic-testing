@@ -281,9 +281,12 @@ class TftpClient:
 
             return {
                 'status': 'sent',
-                'packet_type': 'RRQ',
+                'type': 'RRQ',
                 'filename': filename,
-                'source_port': actual_port
+                'src_ip': self.client_ip,
+                'src_port': actual_port,
+                'dest_ip': self.server_ip,
+                'dest_port': 69
             }
 
         except Exception as e:
@@ -317,9 +320,12 @@ class TftpClient:
 
             return {
                 'status': 'sent',
-                'packet_type': 'ACK',
+                'type': 'ACK',
                 'block_num': block_num,
-                'source_port': actual_port
+                'src_ip': self.client_ip,
+                'src_port': actual_port,
+                'dest_ip': self.server_ip,
+                'dest_port': 69
             }
 
         except Exception as e:
@@ -354,10 +360,13 @@ class TftpClient:
 
             return {
                 'status': 'sent',
-                'packet_type': 'ERROR',
+                'type': 'ERROR',
                 'error_code': error_code,
                 'error_msg': error_msg,
-                'source_port': actual_port
+                'src_ip': self.client_ip,
+                'src_port': actual_port,
+                'dest_ip': self.server_ip,
+                'dest_port': 69
             }
 
         except Exception as e:
