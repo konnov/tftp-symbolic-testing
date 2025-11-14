@@ -72,10 +72,11 @@ OPCODE_OACK == 6
   @typeAlias: action =
       ActionInit(UNIT)
     | ActionClientSendRRQ({ sent: $udpPacket })
+    // only save the sent packet, as it is hard to recover the sent packet from received one
+    | ActionRecvSend({ sent: $udpPacket })
     | ActionClientTimeout({ ipPort: <<Str, Int>> })
     | ActionServerTimeout({ ipPort: <<Str, Int>> })
     | ActionAdvanceClock({ delta: Int })
-    | ActionRecvSend({ rcvd: $udpPacket, sent: $udpPacket })
     | ActionRecvClose({ rcvd: $udpPacket });
  *)
 typedefs_aliases == TRUE
@@ -167,8 +168,8 @@ ActionServerTimeout(_ipPort) == Variant("ActionServerTimeout", [ipPort |-> _ipPo
 \* @type: (Int) => $action;
 ActionAdvanceClock(_delta) == Variant("ActionAdvanceClock", [delta |-> _delta])
 
-\* @type: ($udpPacket, $udpPacket) => $action;
-ActionRecvSend(_rcvd, _sent) == Variant("ActionRecvSend", [rcvd |-> _rcvd, sent |-> _sent])
+\* @type: ($udpPacket) => $action;
+ActionRecvSend(_sent) == Variant("ActionRecvSend", [sent |-> _sent])
 
 \* @type: ($udpPacket) => $action;
 ActionRecvClose(_rcvd) == Variant("ActionRecvClose", [rcvd |-> _rcvd])

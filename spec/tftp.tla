@@ -152,7 +152,7 @@ _ServerSendDataOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
                 THEN newTransfer
                 ELSE serverTransfers[p]
             ]
-        /\ lastAction' = ActionRecvSend(_rcvdPacket, dataPacket)
+        /\ lastAction' = ActionRecvSend(dataPacket)
         /\ UNCHANGED <<clientTransfers, clock>>
 
 \* Utility action: Send OACK in response to RRQ, as per RFC 2347.
@@ -185,7 +185,7 @@ _ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
                 ]
             IN
             /\ packets' = packets \union {oackPacket}
-            /\ lastAction' = ActionRecvSend(_rcvdPacket, oackPacket)
+            /\ lastAction' = ActionRecvSend(oackPacket)
         /\  serverTransfers' = [
                 p \in DOMAIN serverTransfers \union {_clientIpAndPort} |->
                 IF p = _clientIpAndPort
@@ -215,7 +215,7 @@ _ServerSendErrorOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
             ]
         IN
         /\  packets' = packets \union {errorPacket}
-        /\ lastAction' = ActionRecvSend(_rcvdPacket, errorPacket)
+        /\ lastAction' = ActionRecvSend(errorPacket)
         \* do not introduce a new transfer entry on error
         /\  UNCHANGED <<serverTransfers, clientTransfers, clock>>
 
@@ -289,7 +289,7 @@ ClientRecvOACK(_udp) ==
                 /\  clientTransfers' =
                         [ clientTransfers EXCEPT ![ipPort] = newTransfer ]
                 /\  packets' = packets \union { ackPacket }
-                /\ lastAction' = ActionRecvSend(_udp, ackPacket)
+                /\ lastAction' = ActionRecvSend(ackPacket)
             \/  ClientRecvOACKthenSendError::
                 \* the client may also reject the OACK by sending an ERROR
                 LET errorPacket == [
@@ -305,7 +305,7 @@ ClientRecvOACK(_udp) ==
                         p \in DOMAIN clientTransfers \ { ipPort } |->
                             clientTransfers[p]
                     ]
-                /\ lastAction' = ActionRecvSend(_udp, errorPacket)
+                /\ lastAction' = ActionRecvSend(errorPacket)
     /\ UNCHANGED <<serverTransfers, clock>>
 
 (********************* Send and Receive DATA **************************)
@@ -360,7 +360,7 @@ ClientRecvDATA(_udp) ==
         \* TODO: close the connection when the last block is received
         \* send the ACK for the received DATA
         /\ packets' = packets \union { ackPacket }
-        /\ lastAction' = ActionRecvSend(_udp, ackPacket)
+        /\ lastAction' = ActionRecvSend(ackPacket)
     /\ UNCHANGED <<serverTransfers, clock>>
 
 \* The server receives an ACK packet and sends DATA (RRQ transfer).
@@ -402,7 +402,7 @@ ServerSendDATA(_udp) ==
         /\ serverTransfers' = [ serverTransfers EXCEPT ![ipPort] = newTransfer ]
         \* send the DATA for the next block
         /\ packets' = packets \union { dataPacket }
-        /\ lastAction' = ActionRecvSend(_udp, dataPacket)
+        /\ lastAction' = ActionRecvSend(dataPacket)
     /\ UNCHANGED <<clientTransfers, clock>>
 
 \* The server receives an ACK packet and resends DATA that it sent in the past.
@@ -431,7 +431,7 @@ ServerResendDATA(_udp) ==
         /\ clock <= transfer.timestamp + transfer.timeout
         \* only update the timestamp
         /\ serverTransfers' = [ serverTransfers EXCEPT ![ipPort].timestamp = clock ]
-        /\ lastAction' = ActionRecvSend(_udp, dataPacket)
+        /\ lastAction' = ActionRecvSend(dataPacket)
     /\ UNCHANGED <<packets, clientTransfers, clock>>
 
 \* The server receives an ACK packet and closes the connection (RRQ transfer).
