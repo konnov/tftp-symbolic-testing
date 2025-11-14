@@ -827,7 +827,7 @@ class TftpTestHarness:
             if stop_test:
                 break
 
-            self.log.info(f"--- Step {step + 1}/{max_steps} ---")
+            self.log.info(f"\n--- Step {step + 1}/{max_steps} ---")
             enabled_found = False
 
             # Retrieve the new responses from the docker clients
