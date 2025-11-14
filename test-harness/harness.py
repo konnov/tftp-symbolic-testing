@@ -145,6 +145,8 @@ class TftpTestHarness:
         self.test_run_number = 0
         self.current_transitions = []
         self.command_log = []
+        # The list of feedback replies from SUT to process
+        self.sut_feedback_to_process = []
 
     def setup_logging(self):
         """Configure logging for the harness."""
@@ -943,7 +945,6 @@ class TftpTestHarness:
         next_transitions = self.spec_params['next']
 
         turn = TESTER               # Track whose turn it is: tester or SUT.
-        last_sut_feedback = None    # The last operation received from SUT.
         stop_test = False           # Something went wrong, stop the test?
         for step in range(max_steps):
             if stop_test:
@@ -959,6 +960,10 @@ class TftpTestHarness:
                     if frozenset(trans.get("labels")).intersection(TESTER_ACTION_LABELS)
                 ]
             else:
+                if self.sut_feedback_to_process != []:
+                    last_sut_feedback = self.sut_feedback_to_process.pop(0)
+                else:
+                    last_sut_feedback = None
                 op_labels = self._spec_labels_from_operation(last_sut_feedback) if last_sut_feedback else []
                 transitions_to_try = [ trans for trans in next_transitions \
                     if any(label in op_labels for label in trans.get("labels", []))
@@ -1000,16 +1005,16 @@ class TftpTestHarness:
                                 stop_test = True
                                 break
                             # Execute the corresponding TFTP operation
-                            last_sut_feedback = \
-                                self.execute_sut_operation(next_trans["index"], last_action)
-                            if last_sut_feedback:
-                                self.command_log.append(last_sut_feedback)
+                            new_feedback = self.execute_sut_operation(next_trans["index"], last_action)
+                            if new_feedback:
+                                self.command_log.append(new_feedback)
+                                self.sut_feedback_to_process.append(new_feedback)
 
-                                if 'packet_from_server' in last_sut_feedback:
+                                if 'packet_from_server' in new_feedback:
                                     # We have received feedback from the SUT.
                                     # Plan its evaluation for the next iteration.
                                     turn = SUT
-                                elif last_sut_feedback.get('timeout_occurred'):
+                                elif new_feedback.get('timeout_occurred'):
                                     # A timeout occurred - switch to SUT turn to allow
                                     # server timeout transitions to be explored
                                     self.log.info("  Switching to SUT turn to handle timeout")
@@ -1085,7 +1090,7 @@ class TftpTestHarness:
 
                                 # Save trace to file in the current run directory
                                 run_dir = self.get_run_dir()
-                                trace_file = run_dir / "divergence_trace.json"
+                                trace_file = run_dir / "divergence_trace.itf.json"
                                 with open(trace_file, 'w') as f:
                                     json.dump(trace_json, f, indent=2)
                                 self.log.info(f"Saved divergence trace to {trace_file}")
