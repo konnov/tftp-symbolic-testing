@@ -797,6 +797,7 @@ class TftpTestHarness:
         self.log.info(f"=== Starting test run generation {self.test_run_number} (max {max_steps} steps) ===")
 
         # Initialize with a random init transition
+        self.sut_feedback_to_process = set()
         init_transitions = self.spec_params['init']
         if not init_transitions:
             self.log.error("No init transitions available")
