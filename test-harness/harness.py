@@ -87,20 +87,36 @@ class ERROR:
     errorCode: int
 
 
+@dataclass
+class UdpPacket:
+    """TFTP UDP Packet structure as defined in the spec."""
+    srcIp: str
+    srcPort: int
+    destIp: str
+    destPort: int
+    payload: Any
+
+
 @itf_variant
 @dataclass
 class ActionRecvSend:
     """Action representing receiving and sending packets."""
-    rcvd: Any
     sent: Any
 
 
 # The labels of the spec actions that are controlled by the tester.
 # The other labels are controlled by the SUT (TFTP server).
 TESTER_ACTION_LABELS = frozenset([
-    "Init", "ClientSendRRQ", "ClientTimeout",
-    "ClientRecvOACKthenSendAck", "ClientRecvOACKthenSendError",
-    "ClientRecvDATA", "AdvanceClock", "ClientRecvErrorAndCloseConn"
+    "Init",
+    # the tester is obviously in control of the client actions
+    "ClientSendRRQ", "ClientTimeout", "ClientRecvOACKthenSendAck",
+    "ClientRecvOACKthenSendError", "ClientRecvDATA",
+    "ClientRecvErrorAndCloseConn",
+    # also, the tester controls passage of time
+    "AdvanceClock",
+    # these actions have to be handled by the tester as well,
+    # as they are not related to the feedback from the SUT
+    "ServerTimeout", "ServerRecvAckAndCloseConn", "ServerRecvErrorAndCloseConn"
 ])
 
 TESTER = "tester"
@@ -291,9 +307,9 @@ class TftpTestHarness:
                 handler.close()
             self.run_log_handlers.clear()
 
-    def _construct_expected_packet(self, response: Dict[str, Any]) -> Any:
+    def _spec_packet_from_sut_response(self, response: Dict[str, Any]) -> Any:
         """
-        Construct an expected packet structure from Docker client response
+        Construct the packet structure from Docker client response
         that matches the TLA+ specification format.
 
         Args:
@@ -348,9 +364,8 @@ class TftpTestHarness:
         else:
             payload = None
 
-        # Construct packet record using namedtuple (not dict)
-        UdpPacketType = namedtuple("UdpPacket", ["srcIp", "srcPort", "destIp", "destPort", "payload"])
-        expected = UdpPacketType(
+        # Construct packet record
+        spec_packet = UdpPacket(
             srcIp=src_ip,
             srcPort=src_port,
             destIp=dest_ip,
@@ -358,37 +373,24 @@ class TftpTestHarness:
             payload=payload
         )
 
-        return expected
+        return spec_packet
 
-    def _spec_labels_from_operation(self, operation: Dict[str, Any]) -> List[str]:
+    def _spec_labels_from_operation(self, spec_packet: UdpPacket) -> List[str]:
         """
-        Generate the list of action labels that match the expected packet
+        Generate the list of action labels that match the spec-level packet
         from an operation returned by `execute_tftp_operation`.
 
         Args:
-            operation: Operation dictionary from execute_tftp_operation
+            spec_packet: packet structure as per TLA+ specification from the server
         Returns:
             List of action label strings
         """
-        if "timeout_occurred" in operation and operation["timeout_occurred"]:
-            # Let the protocol spec match the timeout.
-            return [ 'ServerTimeout' ]
-
-        # Check if operation has an expected_packet
-        if not operation or 'packet_from_server' not in operation:
-            return []
-
-        packet = operation['packet_from_server']
-        # For namedtuples, access payload as an attribute
-        payload = packet.payload if hasattr(packet, 'payload') else None
-
-        # Check if payload exists and get its type name (for namedtuples)
-        if not payload:
+        if not hasattr(spec_packet, 'payload'):
             return []
 
         # For namedtuples, the type name is the tag
-        if hasattr(payload, '__class__'):
-            tag = type(payload).__name__
+        if hasattr(spec_packet.payload, '__class__'):
+            tag = type(spec_packet.payload).__name__
         else:
             return []
 
@@ -479,40 +481,39 @@ class TftpTestHarness:
             self.log.warning(f"Transition {transition_id} status is UNKNOWN")
             return False
 
-    def execute_sut_operation(self, transition_id: int, last_action: Any) -> Optional[Dict[str, Any]]:
+    def execute_sut_operation(self, transition_id: int, last_spec_action: Any) -> Optional[Dict[str, Any]]:
         """
         Execute the TFTP operation corresponding to the transition in SUT.
 
         Args:
-            transition_id: The transition that was enabled
+            transition_id: The transition that is enabled in the spec
+            last_spec_action: The last action from the spec trace
 
         Returns:
             Dictionary containing the operation details and response
         """
         self.log.info(f"Executing TFTP operation for transition {transition_id}")
 
-        # Query Apalache for the transition details using TRACE
         try:
             # With itf-py 0.4.1+, variants are decoded as typed namedtuples
             # The type name is the tag (e.g., 'ActionInit', 'ActionClientSendRRQ')
-            action_tag = type(last_action).__name__
+            action_tag = type(last_spec_action).__name__
 
             # Determine the TFTP operation based on the action tag
             operation = {
                 'transition_id': transition_id,
                 'timestamp': time.time(),
                 'action_tag': action_tag,
-                'action_value': last_action,
+                'action_value': last_spec_action,
             }
 
             # Parse the action to determine what TFTP command to send
             if action_tag == 'ActionInit':
                 self.log.info("Action: Initialization")
                 operation['command'] = 'init'
-
             elif action_tag == 'ActionClientSendRRQ':
                     self.log.info("Action: Client sends RRQ")
-                    sent_packet = last_action.sent
+                    sent_packet = last_spec_action.sent
                     operation['command'] = 'send_rrq'
 
                     # Send RRQ command to Docker client
@@ -520,7 +521,6 @@ class TftpTestHarness:
                         # Extract packet details (itf-py decoded namedtuples)
                         src_ip = sent_packet.srcIp
                         src_port = sent_packet.srcPort
-                        dest_ip = sent_packet.destIp
                         dest_port = sent_packet.destPort
                         payload = sent_packet.payload
 
@@ -543,43 +543,29 @@ class TftpTestHarness:
 
                         response = self.docker.send_command_to_client(src_ip, command)
                         if response:
-                            operation['response'] = response
-
-                            # Decode response and construct expected packet for TLA+ validation
-                            # Check for 'opcode' which indicates a valid TFTP packet (including ERROR)
-                            if 'opcode' in response:
-                                expected_packet = self._construct_expected_packet(response)
-                                operation['packet_from_server'] = expected_packet
-                                operation['packet_to_server'] = sent_packet
-                                self.log.info(f"Expected packet for validation: {expected_packet}")
-                            elif 'error' in response:
+                            if 'error' in response:
                                 # Docker client error (not a TFTP ERROR packet)
                                 self.log.error(f"Docker client error: {response['error']}")
                         else:
                             self.log.warning("No response from Docker client")
                     else:
                         self.log.warning("Docker manager not initialized, skipping actual TFTP operation")
-
             elif action_tag == 'ActionRecvSend':
-                rcvd_packet = last_action.rcvd
-                sent_packet = last_action.sent
+                sent_packet = last_spec_action.sent
                 self.log.info(f"Action: Receive and Send")
-                self.log.info(f"  Received packet: {rcvd_packet}")
                 self.log.info(f"  Sent packet: {sent_packet}")
                 operation['command'] = 'recv_send'
-                operation['rcvd_packet'] = rcvd_packet
                 operation['sent_packet'] = sent_packet
 
                 # Determine the specific recv/send operation based on packet types
-                rcvd_payload_type = type(rcvd_packet.payload).__name__ if hasattr(rcvd_packet, 'payload') and rcvd_packet.payload else None
-                sent_payload_type = type(sent_packet.payload).__name__ if hasattr(sent_packet, 'payload') and sent_packet.payload else None
+                sent_payload_type = type(sent_packet.payload).__name__ \
+                    if hasattr(sent_packet, 'payload') and sent_packet.payload else None
 
-                self.log.info(f"  Received payload type: {rcvd_payload_type}")
                 self.log.info(f"  Sent payload type: {sent_payload_type}")
 
                 # Handle OACK received → ACK sent (client acknowledges option negotiation)
-                if rcvd_payload_type == 'OACK' and sent_payload_type == 'ACK':
-                    self.log.info("  → Client receives OACK and sends ACK")
+                if sent_payload_type == 'ACK':
+                    self.log.info("  → Client sends ACK")
 
                     if self.docker:
                         # Extract packet details
@@ -603,34 +589,15 @@ class TftpTestHarness:
                         response = self.docker.send_command_to_client(src_ip, command)
 
                         if response:
-                            operation['response'] = response
-
-                            # Check if we got a timeout
-                            if response.get('timeout'):
-                                self.log.warning(f"  ⏱ Timeout waiting for server response after ACK")
-                                self.log.warning(f"  Server did not send DATA packet - connection may be closed")
-                                # Mark this as a timeout operation so turn switches to SUT
-                                # This allows the server timeout transition to be explored
-                                operation['timeout_occurred'] = True
-                            elif 'error' in response:
+                            if 'error' in response:
                                 self.log.error(f"  ✗ Error from Docker client: {response['error']}")
-                            elif 'opcode' in response:
-                                # We received a packet in response (e.g., DATA)
-                                self.log.info(f"  ✓ ACK response: {response}")
-                                expected_packet = self._construct_expected_packet(response)
-                                operation['packet_from_server'] = expected_packet
-                                operation['packet_to_server'] = sent_packet
-                                self.log.info(f"  Expected packet from server: {expected_packet}")
-                            else:
-                                self.log.warning(f"  Unexpected response format: {response}")
                         else:
                             self.log.warning("  No response from Docker client")
                     else:
                         self.log.warning("  Docker manager not initialized, skipping actual operation")
-
-                # Handle OACK received → ERROR sent (client rejects option negotiation)
-                elif rcvd_payload_type == 'OACK' and sent_payload_type == 'ERROR':
-                    self.log.info("  → Client receives OACK and sends ERROR")
+                # Handle ERROR sent (client rejects option negotiation or sends another error)
+                elif sent_payload_type == 'ERROR':
+                    self.log.info("  → Client sends ERROR")
 
                     if self.docker:
                         # Extract packet details
@@ -656,107 +623,25 @@ class TftpTestHarness:
                         response = self.docker.send_command_to_client(src_ip, command)
 
                         if response:
-                            operation['response'] = response
-
-                            # Check response status
-                            if response.get('status') == 'error_sent':
-                                self.log.info(f"  ✓ ERROR sent successfully (code={error_code})")
-                                # ERROR packets don't expect a response - connection is closed
-                            elif 'error' in response:
+                            if 'error' in response:
                                 self.log.error(f"  ✗ Error from Docker client: {response['error']}")
-                            elif 'opcode' in response:
-                                # Unexpected: server sent a response to ERROR
-                                self.log.warning(f"  ⚠ Unexpected response to ERROR: {response}")
-                                expected_packet = self._construct_expected_packet(response)
-                                operation['packet_from_server'] = expected_packet
-                                operation['packet_to_server'] = sent_packet
-                                self.log.info(f"  Unexpected packet from server: {expected_packet}")
                             else:
                                 self.log.warning(f"  Unexpected response format: {response}")
                         else:
                             self.log.warning("  No response from Docker client")
                     else:
                         self.log.warning("  Docker manager not initialized, skipping actual operation")
-
-                # Handle DATA received → ACK sent (client acknowledges data block)
-                elif rcvd_payload_type == 'DATA' and sent_payload_type == 'ACK':
-                    self.log.info("  → Client receives DATA and sends ACK")
-
-                    if self.docker:
-                        # Extract packet details
-                        src_ip = sent_packet.srcIp
-                        src_port = sent_packet.srcPort
-                        dest_port = sent_packet.destPort
-                        ack_payload = sent_packet.payload
-
-                        # Extract ACK block number
-                        block_num = ack_payload.blockNum
-
-                        # Build ACK command for Docker client
-                        command = {
-                            'type': 'ack',
-                            'block_num': block_num,
-                            'dest_port': dest_port,
-                            'source_port': src_port
-                        }
-
-                        self.log.info(f"  Sending ACK command to client: {command}")
-                        response = self.docker.send_command_to_client(src_ip, command)
-
-                        if response:
-                            operation['response'] = response
-
-                            # Check if we got a timeout
-                            if response.get('timeout'):
-                                self.log.warning(f"  ⏱ Timeout waiting for server response after ACK")
-                                self.log.info(f"  This may be normal if all data blocks received")
-                                # Mark this as a timeout operation so turn switches to SUT
-                                operation['timeout_occurred'] = True
-                            elif 'error' in response:
-                                self.log.error(f"  ✗ Error from Docker client: {response['error']}")
-                            elif 'opcode' in response:
-                                # We received another packet (e.g., next DATA block)
-                                self.log.info(f"  ✓ ACK response: {response}")
-                                expected_packet = self._construct_expected_packet(response)
-                                operation['packet_from_server'] = expected_packet
-                                operation['packet_to_server'] = sent_packet
-                                self.log.info(f"  Expected packet from server: {expected_packet}")
-                            else:
-                                self.log.warning(f"  Unexpected response format: {response}")
-                        else:
-                            self.log.warning("  No response from Docker client")
-                    else:
-                        self.log.warning("  Docker manager not initialized, skipping actual operation")
-
                 else:
-                    # TODO: Handle other recv/send combinations (DATA→ACK, etc.)
-                    self.log.warning(f"  Unhandled recv/send combination: {rcvd_payload_type} → {sent_payload_type}")
-
-
+                    # TODO: Handle other combinations (DATA→ACK, etc.)
+                    self.log.warning(f"  Unhandled send: ... → {sent_payload_type}")
             elif action_tag == 'ActionRecvClose':
-                rcvd_packet = last_action.rcvd
-                self.log.info(f"Action: Receive and Close")
-                self.log.info(f"  Received packet: {rcvd_packet}")
-                operation['command'] = 'recv_close'
-                operation['rcvd_packet'] = rcvd_packet
-                # TODO: Close the connection
-
-            elif action_tag == 'ActionClientTimeout':
-                ip_port = last_action.ipPort
-                self.log.info(f"Action: Client Timeout on {ip_port}")
-                operation['command'] = 'client_timeout'
-                operation['ip_port'] = ip_port
-                # TODO: Handle client timeout
-
+                # This action is handled by the spec and SUT separately
+                pass
             elif action_tag == 'ActionServerTimeout':
-                ip_port = last_action.ipPort
-                self.log.info(f"Action: Server Timeout on {ip_port}")
-                operation['command'] = 'server_timeout'
-                operation['ip_port'] = ip_port
-                # TODO: Handle server timeout
-
+                # Server timeout is handled by the spec; no action needed in SUT
+                pass
             elif action_tag == 'ActionAdvanceClock':
-                delta = last_action.delta
+                delta = last_spec_action.delta
                 self.log.info(f"Action: Advance Clock by {delta}")
                 operation['command'] = 'advance_clock'
                 operation['delta'] = delta
@@ -766,7 +651,6 @@ class TftpTestHarness:
                 self.log.info(f"  Sleeping for {delta} seconds to advance clock...")
                 time.sleep(delta)
                 self.log.info(f"  ✓ Clock advanced by {delta} seconds")
-
             else:
                 self.log.warning(f"Unknown action tag: {action_tag}")
                 operation['command'] = 'unknown'
@@ -953,21 +837,35 @@ class TftpTestHarness:
             self.log.info(f"\n--- Step {step + 1}/{max_steps} ---")
             enabled_found = False
 
-            # Try to find an enabled transition by the player whose turn it is.
-            # Only use the transitions that match the current turn.
-            if turn == TESTER:
-                transitions_to_try = [ trans for trans in next_transitions \
-                    if frozenset(trans.get("labels")).intersection(TESTER_ACTION_LABELS)
-                ]
-            else:
-                if self.sut_feedback_to_process != []:
-                    last_sut_feedback = self.sut_feedback_to_process.pop(0)
-                else:
-                    last_sut_feedback = None
-                op_labels = self._spec_labels_from_operation(last_sut_feedback) if last_sut_feedback else []
+            # Retrieve the new responses from the docker clients
+            if self.docker:
+                for src_ip in DockerManager.CLIENT_IPS:
+                    cmd = { 'type': 'get_packets' }
+                    response = self.docker.send_command_to_client(src_ip, cmd)
+                    if response:
+                        for sut_packet in response.get('packets', []):
+                            # convert to spec packet format
+                            spec_packet = self._spec_packet_from_sut_response(sut_packet)
+                            self.log.info(f"Received packet from SUT: {spec_packet}")
+                            self.sut_feedback_to_process.append(spec_packet)
+
+            if self.sut_feedback_to_process != []:
+                # give priority to SUT feedback
+                # TODO: choose randomly!
+                last_sut_feedback = self.sut_feedback_to_process.pop(0)
+                turn = SUT
+                op_labels = self._spec_labels_from_operation(last_sut_feedback) \
+                    if last_sut_feedback else []
                 transitions_to_try = [ trans for trans in next_transitions \
                     if any(label in op_labels for label in trans.get("labels", []))
                 ]
+            else:
+                turn = TESTER
+                transitions_to_try = [ trans for trans in next_transitions \
+                    if frozenset(trans.get("labels")).intersection(TESTER_ACTION_LABELS)
+                ]
+
+            self.log.info(f"Turn: {turn}. Transitions to try: {transitions_to_try}")
 
             while len(transitions_to_try) > 0 and not enabled_found and not stop_test:
                 # Select a random next transition from the transitions we have not tried yet
@@ -1005,101 +903,66 @@ class TftpTestHarness:
                                 stop_test = True
                                 break
                             # Execute the corresponding TFTP operation
-                            new_feedback = self.execute_sut_operation(next_trans["index"], last_action)
-                            if new_feedback:
-                                self.sut_command_log.append(new_feedback)
-                                self.sut_feedback_to_process.append(new_feedback)
+                            self.execute_sut_operation(next_trans["index"], last_action)
+                    elif turn == SUT:
+                        assert last_sut_feedback is not None, \
+                            "last_sut_feedback should not be None on SUT turn"
 
-                                if 'packet_from_server' in new_feedback:
-                                    # We have received feedback from the SUT.
-                                    # Plan its evaluation for the next iteration.
-                                    turn = SUT
-                                elif new_feedback.get('timeout_occurred'):
-                                    # A timeout occurred - switch to SUT turn to allow
-                                    # server timeout transitions to be explored
-                                    self.log.info("  Switching to SUT turn to handle timeout")
-                                    turn = SUT
-                    else:
-                        if not last_sut_feedback:
-                            self.log.error("No operation to validate on SUT turn")
-                            return False
-
-                        # Check if this is a timeout operation
-                        if last_sut_feedback.get('timeout_occurred'):
-                            # For timeout, we don't validate a packet - just switch back to TESTER
-                            # The spec should have executed a timeout transition
-                            self.log.info("  Timeout handled, switching back to TESTER turn")
+                        # Normal case: validate the received packet
+                        # Create the variant using module-level dataclass
+                        expected_last_action = ActionRecvSend(sent=last_sut_feedback)
+                        self.log.info(f"Assume lastAction: {expected_last_action}")
+                        # Assume that lastAction equals the reconstructed action
+                        equalities = {
+                            "lastAction": value_to_json(expected_last_action)
+                        }
+                        assume_result = self.client.assume_state(equalities, check_enabled=True)
+                        if isinstance(assume_result, AssumptionEnabled):
+                            self.log.info("✓ Received packet matches the spec")
                             turn = TESTER
                             last_sut_feedback = None
                             enabled_found = True
                             self.transition_log.append(next_trans)
+                            # save the current snapshot to remember the decision!
+                            self.current_snapshot = assume_result.snapshot_id
+                        elif isinstance(assume_result, AssumptionDisabled):
+                            # Test found a discrepancy - this is valuable!
+                            # However, we may have several SUT actions to try.
+                            # Hence, do not break the loop yet.
+                            # If we do not find a corresponding transition,
+                            # we will break out by enabled_found = False.
+                            enabled_found = False
+                            # Transition was disabled, rollback and try another
+                            if snapshot_before is not None:
+                                self.log.info(f"Rollback to snapshot {snapshot_before}")
+                                self.client.rollback(snapshot_before)
+                                self.current_snapshot = snapshot_before
                         else:
-                            # Normal case: validate the received packet
-                            # Create the variant using module-level dataclass
-                            expected_last_action = ActionRecvSend(
-                                rcvd=last_sut_feedback['packet_to_server'],
-                                sent=last_sut_feedback['packet_from_server']
-                            )
-                            self.log.info(f"Assume lastAction: {expected_last_action}")
-                            # Assume that lastAction equals the reconstructed action
-                            equalities = {
-                                "lastAction": value_to_json(expected_last_action)
-                            }
-                            assume_result = self.client.assume_state(equalities, check_enabled=True)
-                            if isinstance(assume_result, AssumptionEnabled):
-                                self.log.info("✓ Received packet matches the spec")
-                                turn = TESTER
-                                last_sut_feedback = None
-                                enabled_found = True
-                                self.transition_log.append(next_trans)
-                                # save the current snapshot to remember the decision!
-                                self.current_snapshot = assume_result.snapshot_id
-                            elif isinstance(assume_result, AssumptionDisabled):
-                                # Test found a discrepancy - this is valuable!
-                                # However, we may have several SUT actions to try.
-                                # Hence, do not break the loop yet.
-                                # If we do not find a corresponding transition,
-                                # we will break out by enabled_found = False.
-                                enabled_found = False
-                                # Transition was disabled, rollback and try another
-                                if snapshot_before is not None:
-                                    self.log.info(f"Rollback to snapshot {snapshot_before}")
-                                    self.client.rollback(snapshot_before)
-                                    self.current_snapshot = snapshot_before
-                            else:
-                                self.log.warning("? Unable to validate received packet")
-                                stop_test = True
+                            self.log.warning("? Unable to validate received packet")
+                            stop_test = True
 
             if not enabled_found and not stop_test:
-                if turn == SUT:
-                    if last_sut_feedback and last_sut_feedback.get('timeout_occurred'):
-                        # FIX #2: even if there was a timeout, a client should have a chance to
-                        # receive a packet from the server (which may have been sent already!).
-                        self.log.warning("✗ Last SUT timeout does NOT match the spec - continue")
-                        stop_test = False # continue the test
-                        turn = TESTER
-                        last_sut_feedback = None
-                    else:
-                        self.log.warning("✗ Last SUT operation does NOT match the spec - test diverged!")
-
-                        # Save the current trace for debugging
-                        try:
-                            trace_data = self.get_current_trace()
-                            if trace_data:
-                                trace_json, _ = trace_data
-
-                                # Save trace to file in the current run directory
-                                run_dir = self.get_run_dir()
-                                trace_file = run_dir / "divergence_trace.itf.json"
-                                with open(trace_file, 'w') as f:
-                                    json.dump(trace_json, f, indent=2)
-                                self.log.info(f"Saved divergence trace to {trace_file}")
-                        except Exception as e:
-                            self.log.error(f"Failed to save divergence trace: {e}", exc_info=True)
-
-                        stop_test = True
-                else:
+                if turn != SUT:
                     self.log.warning(f"✗ Could not find enabled transition for tester - ending test run")
+                    stop_test = True
+                else:
+                    self.log.warning("✗ Last SUT operation does NOT match the spec - test diverged!")
+
+                    # Save the current trace for debugging
+                    try:
+                        trace_data = self.get_current_trace()
+                        if trace_data:
+                            trace_json, _ = trace_data
+
+                            # Save trace to file in the current run directory
+                            run_dir = self.get_run_dir()
+                            trace_file = run_dir / "divergence_trace.itf.json"
+                            with open(trace_file, 'w') as f:
+                                json.dump(trace_json, f, indent=2)
+                            self.log.info(f"Saved divergence trace to {trace_file}")
+                    except Exception as e:
+                        self.log.error(f"Failed to save divergence trace: {e}", exc_info=True)
+
                     stop_test = True
 
         # Save the test run
