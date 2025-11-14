@@ -197,6 +197,57 @@ def parse_log_file(log_file: str) -> List[Dict[str, Any]]:
             elif 'Expected packet' in message:
                 pass  # Skip this message
 
+            # Look for EXECUTE ACTION entries (actions initiated by the spec)
+            elif 'EXECUTE ACTION:' in message:
+                # Extract action type from the message
+                # Format: EXECUTE ACTION: ActionClientSendRRQ(sent=Rec(...)) or ActionAdvanceClock(delta=5)
+                action_match = re.search(r'EXECUTE ACTION:\s*(\w+)\(', message)
+                if action_match:
+                    action_tag = action_match.group(1)
+                    is_global = action_tag in ['ActionClientTimeout', 'ActionServerTimeout', 'ActionAdvanceClock']
+                    
+                    if is_global:
+                        # For global actions, parse the entire action structure
+                        action_data = {}
+                        action_data['payloadTag'] = action_tag
+                        action_data['payload'] = {}
+                        action_data['entry_type'] = 'global_action'
+                        
+                        # Extract specific fields for global actions
+                        if action_tag == 'ActionAdvanceClock':
+                            delta_match = re.search(r'delta=(\d+)', message)
+                            if delta_match:
+                                action_data['payload']['delta'] = int(delta_match.group(1))
+                        elif action_tag in ['ActionClientTimeout', 'ActionServerTimeout']:
+                            # Extract ipPort tuple
+                            ip_port_match = re.search(r"ipPort=\('([^']+)',\s*(\d+)\)", message)
+                            if ip_port_match:
+                                action_data['payload']['ipPort'] = [ip_port_match.group(1), int(ip_port_match.group(2))]
+                        
+                        entries.append(action_data)
+                    else:
+                        # For send actions, extract the sent=Rec(...) packet
+                        # Look for sent=Rec(...) or sent=UdpPacket(...)
+                        sent_match = re.search(r'sent=(Rec|UdpPacket)\(', message)
+                        if sent_match:
+                            # Extract the packet starting from "sent="
+                            packet_data = parse_namedtuple_packet(message[message.index('sent='):])
+                            if packet_data:
+                                packet_data['entry_type'] = 'packet'
+                                packet_data['source'] = 'action'
+                                packet_data['direction'] = 'sent'  # Mark as sent so it passes the direction filter
+                                entries.append(packet_data)
+
+            # Look for SUT PACKET entries (packets received from the system under test)
+            elif 'SUT PACKET:' in message:
+                # Extract packet from the message
+                packet_data = parse_namedtuple_packet(message)
+                if packet_data:
+                    packet_data['direction'] = 'received'
+                    packet_data['entry_type'] = 'packet'
+                    packet_data['source'] = 'sut_packet'
+                    entries.append(packet_data)
+
             # Look for packet information (Received/Sent packets from spec trace)
             elif 'Received packet:' in message or 'Sent packet:' in message:
                 # Extract packet from the message
@@ -486,8 +537,17 @@ def generate_mermaid_diagram(entries: List[Dict[str, Any]]) -> str:
             payload = entry.get('payload', {})
             payload_str = format_payload(payload_tag, payload)
 
-            # Use dashed arrow for Docker responses, solid for spec packets
-            arrow = '-->>' if entry.get('direction') == 'docker_response' else '->>'
+            # Determine arrow style based on source:
+            # - 'sut_packet': packets from SUT (dashed arrows)
+            # - 'action': actions from spec (solid arrows)
+            # - docker_response: legacy SUT responses (dashed arrows for compatibility)
+            # - default: solid arrows for everything else
+            source = entry.get('source')
+            if source == 'sut_packet' or entry.get('direction') == 'docker_response':
+                arrow = '-->>'  # Dashed arrow for SUT packets
+            else:
+                arrow = '->>'  # Solid arrow for actions and other packets
+            
             lines.append(f"    {src_id}{arrow}{dest_id}: {payload_str}")
 
         elif entry_type == 'command':
@@ -554,6 +614,27 @@ def generate_mermaid_diagram(entries: List[Dict[str, Any]]) -> str:
                 # Extract timeout details if possible
                 clean_msg = message.replace('⏱', '').strip()
                 lines.append(f"    Note over {first_participant},{last_participant}: ⏱ {clean_msg}")
+
+        elif entry_type == 'global_action':
+            # Handle global actions (timeouts and clock advances) that don't have packet arrows
+            payload_tag = entry.get('payloadTag', 'UNKNOWN')
+            payload = entry.get('payload', {})
+            
+            if payload_tag == 'ActionAdvanceClock':
+                delta = payload.get('delta', 0)
+                total_clock += delta
+                if first_participant and last_participant:
+                    lines.append(f"    Note over {first_participant},{last_participant}: ⏰ Clock +{delta}s (total: {total_clock}s)")
+            elif payload_tag in ['ActionClientTimeout', 'ActionServerTimeout']:
+                timeout_type = 'Client' if payload_tag == 'ActionClientTimeout' else 'Server'
+                ip_port = payload.get('ipPort', ('?', '?'))
+                if isinstance(ip_port, (list, tuple)) and len(ip_port) >= 2:
+                    ip, port = ip_port[0], ip_port[1]
+                    if first_participant and last_participant:
+                        lines.append(f"    Note over {first_participant},{last_participant}: ⏱ {timeout_type} Timeout @ {ip}:{port}")
+                else:
+                    if first_participant and last_participant:
+                        lines.append(f"    Note over {first_participant},{last_participant}: ⏱ {timeout_type} Timeout")
 
         elif entry_type == 'timeout_mismatch':
             # Timeout-related spec mismatch that allows test to continue
