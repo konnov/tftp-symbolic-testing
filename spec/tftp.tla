@@ -509,7 +509,7 @@ ClientRecvErrorAndCloseConn(_udp) ==
 ServerSendDup(_udp) ==
     ServerSendDup::
     /\ _udp.srcIp = SERVER_IP
-    /\ lastAction' = ActionServerSendDup(_udp)
+    /\ lastAction' = ActionRecvSend(_udp)
     /\ UNCHANGED <<packets, serverTransfers, clientTransfers, clock>>
 
 (******************************* Time ***********************************)
