@@ -227,13 +227,19 @@ ServerRecvRRQ(_udp) ==
     /\ _udp.destPort = 69
     /\  LET rrq == AsRRQ(_udp.payload)
             clientIpAndPort == <<_udp.srcIp, _udp.srcPort>> IN
+        \* A client can open multiple connections from different ports.
         \* The transfer has not been initiated yet.
-        \* Yet, a client can open multiple connections from different ports.
         /\ clientIpAndPort \notin DOMAIN serverTransfers
         \* the server allocates a new port for the connection, if it can find one
         /\ \E newServerPort \in PORTS:
-            /\ \A p \in DOMAIN serverTransfers:
-                serverTransfers[p].port /= newServerPort
+            /\  \/  \A p \in DOMAIN serverTransfers:
+                        serverTransfers[p].port /= newServerPort
+                \* Or, there was an ERROR packet that cancelled the active transfer.
+                \* This has a bad smell, but is needed to conform tftpd-hpa.
+                \/ \E packet \in packets:
+                    /\ IsERROR(packet.payload)
+                    /\ packet.destIp = SERVER_IP
+                    /\ packet.destPort = newServerPort
             \* According to RFC 2347, the server may respond with DATA or OACK
             /\  \/ _ServerSendDataOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
                 \/ _ServerSendOackOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
