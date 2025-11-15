@@ -78,7 +78,7 @@ OPCODE_OACK == 6
     | ActionServerTimeout({ ipPort: <<Str, Int>> })
     | ActionAdvanceClock({ delta: Int })
     | ActionRecvClose({ rcvd: $udpPacket })
-    | ActionServerSendOutdated({ sent: $udpPacket })
+    | ActionServerSendDup({ sent: $udpPacket })
     ;
  *)
 typedefs_aliases == TRUE
@@ -177,7 +177,7 @@ ActionRecvSend(_sent) == Variant("ActionRecvSend", [sent |-> _sent])
 ActionRecvClose(_rcvd) == Variant("ActionRecvClose", [rcvd |-> _rcvd])
 
 \* @type: ($udpPacket) => $action;
-ActionServerSendOutdated(_sent) ==
-    Variant("ActionServerSendOutdated", [sent |-> _sent])
+ActionServerSendDup(_sent) ==
+    Variant("ActionServerSendDup", [sent |-> _sent])
 
 ===============================================================================

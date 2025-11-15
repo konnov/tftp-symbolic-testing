@@ -9,7 +9,8 @@ This script:
 4. Controls Docker containers running the TFTP server and clients
 5. Executes TFTP operations and validates against the specification
 
-Claude Sonnet 4.5 and Igor Konnov, 2025
+The initial version by Claude Sonnet 4.5, 2025
+Debugging and final refactoring by Igor Konnov, 2025
 """
 
 from collections import namedtuple
@@ -415,11 +416,11 @@ class TftpTestHarness:
 
         if tag == 'DATA':
             return ['ServerRecvRRQthenSendData', 'ServerSendDATA',
-                    'ServerResendDATA', 'ServerSendOutdated']
+                    'ServerResendDATA', 'ServerSendDup']
         elif tag == 'OACK':
-            return ['ServerRecvRRQthenSendOack', 'ServerSendOutdated']
+            return ['ServerRecvRRQthenSendOack', 'ServerSendDup']
         elif tag == 'ERROR':
-            return ['ServerRecvRRQthenSendError', 'ServerSendOutdated']
+            return ['ServerRecvRRQthenSendError', 'ServerSendDup']
         # TODO: handle 'ACK' when we deal with WRQ
 
         return []
