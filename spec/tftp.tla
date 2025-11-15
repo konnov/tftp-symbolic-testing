@@ -233,7 +233,9 @@ ServerRecvRRQ(_udp) ==
         \* the server allocates a new port for the connection, if it can find one
         /\ \E newServerPort \in PORTS:
             /\  \/  \A p \in DOMAIN serverTransfers:
-                        serverTransfers[p].port /= newServerPort
+                        \/ serverTransfers[p].port /= newServerPort
+                        \* FIX #6: allow reusing ports from completed transfers
+                        \/ serverTransfers[p].transferred = serverTransfers[p].tsize
                 \* Or, there was an ERROR packet that cancelled the active transfer.
                 \* This has a bad smell, but is needed to conform tftpd-hpa.
                 \/ \E packet \in packets:
