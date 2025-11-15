@@ -227,12 +227,10 @@ ServerRecvRRQ(_udp) ==
     /\ _udp.destPort = 69
     /\  LET rrq == AsRRQ(_udp.payload)
             clientIpAndPort == <<_udp.srcIp, _udp.srcPort>> IN
-        \* A client can open multiple connections from different ports.
-        \* The transfer has not been initiated yet.
-        /\ clientIpAndPort \notin DOMAIN serverTransfers
         \* the server allocates a new port for the connection, if it can find one
-        /\ \E newServerPort \in PORTS:
-            /\  \/  \A p \in DOMAIN serverTransfers:
+        \E newServerPort \in PORTS:
+            /\  \* the server allocates a new port for the connection, if it can find one
+                \/  \A p \in DOMAIN serverTransfers:
                         \/ serverTransfers[p].port /= newServerPort
                         \* FIX #6: allow reusing ports from completed transfers
                         \/ serverTransfers[p].transferred = serverTransfers[p].tsize
