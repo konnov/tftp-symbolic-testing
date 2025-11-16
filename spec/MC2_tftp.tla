@@ -14,6 +14,8 @@ FILES == SetAsFun({
     <<"file2", 2099>>,
     <<"file3", 12345>>
 })
+\* Disable RFC 1350-style connections without options, as they lead to test divergence.
+RFC1350_CONNECTION_ALLOWED == FALSE
 
 VARIABLES
     \* The set of UDP packets in the system.

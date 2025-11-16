@@ -20,7 +20,10 @@ CONSTANTS
     PORTS,
     \* The filenames that can be read/written, mapped to their sizes in bytes.
     \* @type: Str -> Int;
-    FILES
+    FILES,
+    \* Whether RFC 1350-style connections without options are allowed.
+    \* @type: Bool;
+    RFC1350_CONNECTION_ALLOWED
 
 VARIABLES
     \* The set of UDP packets in the system.
@@ -97,6 +100,9 @@ ClientSendRRQ(_srcIp, _srcPort, _filename, _options) ==
                 payload |-> rrq]
     IN
     /\ <<_srcIp, _srcPort>> \notin DOMAIN clientTransfers
+    /\ RFC1350_CONNECTION_ALLOWED \/ DOMAIN _options /= {}
+    \* RFC-2349: In Read Request packets, a size of "0" is specified in the request...
+    /\ "tsize" \in DOMAIN _options => _options["tsize"] = 0
     /\ clientTransfers' = [
             p \in DOMAIN clientTransfers \union {<<_srcIp, _srcPort>>} |->
             IF p = <<_srcIp, _srcPort>>
@@ -171,14 +177,16 @@ _ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
         \* the blocksize option, it sends an Option Acknowledgment
         \* (OACK) to the client.  The specified value must be less
         \* than or equal to the value specified by the client."
-        /\ "blksize" \notin DOMAIN _rrq.options \/ blksize <= _rrq.options["blksize"]
+        /\ "blksize" \in DOMAIN _rrq.options => blksize <= _rrq.options["blksize"]
+        /\ "blksize" \notin DOMAIN _rrq.options => blksize = 512
         \* If the server is willing to accept the timeout option, it sends an
         \* Option Acknowledgment (OACK) to the client.  The specified timeout
         \* value must match the value specified by the client.
-        /\ "timeout" \notin DOMAIN _rrq.options \/ timeout = _rrq.options["timeout"]
+        /\ "timeout" \in DOMAIN _rrq.options => timeout = _rrq.options["timeout"]
+        /\ "timeout" \notin DOMAIN _rrq.options => timeout = 255
         \* In Read Request packets, a size of "0" is specified in the request
         \* and the size of the file, in octets, is returned in the OACK.
-        /\ "tsize" \notin DOMAIN _rrq.options \/ _rrq.options["tsize"] = 0
+        /\ "tsize" \in DOMAIN _rrq.options => _rrq.options["tsize"] = 0
         /\  LET tsize ==
                     IF "tsize" \in DOMAIN _rrq.options THEN FILES[_rrq.filename] ELSE 0
                 oackOptions == mk_options(optionsSubset, blksize, tsize, timeout)
@@ -289,8 +297,6 @@ ClientRecvOACK(_udp) ==
         /\  \/  ClientRecvOACKthenSendAck::
                 \* the nominal case: accept OACK and send ACK for block 0
                 \* However, check that the server behaves as per RFC 2347.
-                /\  ("tsize" \in DOMAIN oack.options)
-                        => (oack.options["tsize"] <= transfer.tsize)
                 /\  ("blksize" \in DOMAIN oack.options)
                         => (oack.options["blksize"] <= transfer.blksize)
                 /\  ("timeout" \in DOMAIN oack.options)
@@ -360,6 +366,9 @@ ClientRecvDATA(_udp) ==
                 payload |-> ACK(data.blockNum)
             ]
         IN
+        \* if RFC 1350-style connections without options are disabled,
+        \* then we do not interpret DATA(1) as a new connection
+        /\ ~RFC1350_CONNECTION_ALLOWED => ~isFirstPacket
         \* make sure that we receive from the correct port
         /\ ~isFirstPacket => (_udp.srcPort = transfer.port)
         \* do not receive packets if the connection must timeout
