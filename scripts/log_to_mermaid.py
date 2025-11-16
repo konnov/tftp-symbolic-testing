@@ -170,20 +170,35 @@ def get_participant_label(ip: str, port: int) -> str:
 def parse_log_file(log_file: str) -> List[Dict[str, Any]]:
     """
     Parse the log file and extract packet information and events in chronological order.
+    Only processes entries from the last test run in the log file.
 
     Returns:
         List of entries (packets and events) in order of appearance.
     """
     entries: List[Dict[str, Any]] = []
 
+    # First pass: find the line number where the last test run starts
+    last_run_start_line = 0
     with open(log_file, 'r') as f:
-        for line in f:
-            # Skip non-INFO lines
-            if ' - INFO - ' not in line:
+        for line_num, line in enumerate(f, 1):
+            if '=== Starting test run generation' in line:
+                last_run_start_line = line_num
+
+    # Second pass: parse entries only from the last test run
+    with open(log_file, 'r') as f:
+        for line_num, line in enumerate(f, 1):
+            # Skip lines before the last test run starts
+            if line_num < last_run_start_line:
                 continue
 
-            # Extract the message part after INFO
+            # Skip lines that are not INFO or WARNING
+            if ' - INFO - ' not in line and ' - WARNING - ' not in line:
+                continue
+
+            # Extract the message part after INFO or WARNING
             parts = line.split(' - INFO - ', 1)
+            if len(parts) < 2:
+                parts = line.split(' - WARNING - ', 1)
             if len(parts) < 2:
                 continue
 
