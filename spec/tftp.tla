@@ -145,6 +145,8 @@ _ServerSendDataOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
                 transferred |-> dataSize
             ]
         IN
+        \* The no-negotiation case of RFC 2347. No options were requested.
+        /\  DOMAIN _rrq.options = {}
         /\  packets' = packets \union { dataPacket }
         /\  serverTransfers' = [
                 p \in DOMAIN serverTransfers \union {_clientIpAndPort} |->
@@ -163,6 +165,8 @@ _ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
     ServerRecvRRQthenSendOack::
     \E optionsSubset \in SUBSET DOMAIN _rrq.options,
             blksize \in 0..65464, timeout \in 1..255:
+        \* RFC 2349: option negotiation
+        /\  DOMAIN _rrq.options /= {}
         \* RFC 2349, Section 3.1: "If the server is willing to accept
         \* the blocksize option, it sends an Option Acknowledgment
         \* (OACK) to the client.  The specified value must be less
