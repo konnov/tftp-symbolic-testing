@@ -28,7 +28,7 @@ def parse_namedtuple_packet(packet_str: str) -> Optional[Dict[str, Any]]:
     start_match = re.search(r"(?:UdpPacket|Rec)\(", packet_str)
     if not start_match:
         return None
-    
+
     # Extract everything between the outer parentheses by counting parens
     start_pos = start_match.end()
     paren_count = 1
@@ -39,10 +39,10 @@ def parse_namedtuple_packet(packet_str: str) -> Optional[Dict[str, Any]]:
         elif packet_str[i] == ')':
             paren_count -= 1
         i += 1
-    
+
     if paren_count != 0:
         return None
-    
+
     fields_str = packet_str[start_pos:i-1]
 
     # Parse fields
@@ -204,31 +204,31 @@ def parse_log_file(log_file: str) -> List[Dict[str, Any]]:
                 action_match = re.search(r'EXECUTE ACTION:\s*(\w+)\(', message)
                 if action_match:
                     action_tag = action_match.group(1)
-                    
+
                     if action_tag == 'ActionAdvanceClock':
                         # Clock advance is a global action
                         action_data = {}
                         action_data['payloadTag'] = action_tag
                         action_data['payload'] = {}
                         action_data['entry_type'] = 'global_action'
-                        
+
                         delta_match = re.search(r'delta=(\d+)', message)
                         if delta_match:
                             action_data['payload']['delta'] = int(delta_match.group(1))
-                        
+
                         entries.append(action_data)
                     elif action_tag in ['ActionClientTimeout', 'ActionServerTimeout']:
                         # Timeout actions are self-events for specific participants
                         action_data = {}
                         action_data['payloadTag'] = action_tag
                         action_data['entry_type'] = 'timeout_action'
-                        
+
                         # Extract ipPort tuple
                         ip_port_match = re.search(r"ipPort=\('([^']+)',\s*(\d+)\)", message)
                         if ip_port_match:
                             action_data['ip'] = ip_port_match.group(1)
                             action_data['port'] = int(ip_port_match.group(2))
-                        
+
                         entries.append(action_data)
                     else:
                         # For send actions, extract the sent=Rec(...) packet
@@ -316,31 +316,46 @@ def collect_participants(entries: List[Dict[str, Any]]) -> Tuple[List[Tuple[str,
 
     # Classify all participants
     for entry in entries:
-        if entry.get('entry_type') != 'packet':
-            continue
+        entry_type = entry.get('entry_type')
 
-        src_ip = entry.get('srcIp')
-        src_port = entry.get('srcPort')
-        dest_ip = entry.get('destIp')
-        dest_port = entry.get('destPort')
+        if entry_type == 'packet':
+            src_ip = entry.get('srcIp')
+            src_port = entry.get('srcPort')
+            dest_ip = entry.get('destIp')
+            dest_port = entry.get('destPort')
 
-        if src_ip and src_port is not None:
-            src_id = get_participant_id(src_ip, src_port)
-            src_label = get_participant_label(src_ip, src_port)
+            if src_ip and src_port is not None:
+                src_id = get_participant_id(src_ip, src_port)
+                src_label = get_participant_label(src_ip, src_port)
 
-            if src_ip in server_ips or src_port < 1024:
-                servers.add((src_id, src_label))
-            else:
-                clients.add((src_id, src_label))
+                if src_ip in server_ips or src_port < 1024:
+                    servers.add((src_id, src_label))
+                else:
+                    clients.add((src_id, src_label))
 
-        if dest_ip and dest_port is not None:
-            dest_id = get_participant_id(dest_ip, dest_port)
-            dest_label = get_participant_label(dest_ip, dest_port)
+            if dest_ip and dest_port is not None:
+                dest_id = get_participant_id(dest_ip, dest_port)
+                dest_label = get_participant_label(dest_ip, dest_port)
 
-            if dest_ip in server_ips or dest_port < 1024:
-                servers.add((dest_id, dest_label))
-            else:
-                clients.add((dest_id, dest_label))
+                if dest_ip in server_ips or dest_port < 1024:
+                    servers.add((dest_id, dest_label))
+                else:
+                    clients.add((dest_id, dest_label))
+
+        elif entry_type == 'timeout_action':
+            # Add participants from timeout actions
+            ip = entry.get('ip')
+            port = entry.get('port')
+
+            if ip and port is not None:
+                participant_id = get_participant_id(ip, port)
+                participant_label = get_participant_label(ip, port)
+
+                # Classify based on IP being in server_ips or port < 1024
+                if ip in server_ips or port < 1024:
+                    servers.add((participant_id, participant_label))
+                else:
+                    clients.add((participant_id, participant_label))
 
     # Sort for consistent ordering
     client_list = sorted(clients)
@@ -419,7 +434,7 @@ def generate_mermaid_diagram(entries: List[Dict[str, Any]]) -> str:
                 arrow = '-->>'  # Dashed arrow for SUT packets
             else:
                 arrow = '->>'  # Solid arrow for actions and other packets
-            
+
             lines.append(f"    {src_id}{arrow}{dest_id}: {payload_str}")
 
         elif entry_type == 'command':
@@ -466,7 +481,7 @@ def generate_mermaid_diagram(entries: List[Dict[str, Any]]) -> str:
             payload_tag = entry.get('payloadTag', 'UNKNOWN')
             ip = entry.get('ip')
             port = entry.get('port')
-            
+
             if ip and port is not None:
                 participant_id = participant_map.get((ip, port), get_participant_id(ip, port))
                 timeout_type = 'Client Timeout' if payload_tag == 'ActionClientTimeout' else 'Server Timeout'
@@ -476,7 +491,7 @@ def generate_mermaid_diagram(entries: List[Dict[str, Any]]) -> str:
             # Handle global actions (clock advances) that don't have packet arrows
             payload_tag = entry.get('payloadTag', 'UNKNOWN')
             payload = entry.get('payload', {})
-            
+
             if payload_tag == 'ActionAdvanceClock':
                 delta = payload.get('delta', 0)
                 total_clock += delta
