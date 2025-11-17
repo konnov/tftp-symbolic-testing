@@ -129,9 +129,9 @@ class ActionRecvSend:
 TESTER_ACTION_LABELS = frozenset([
     "Init",
     # the tester is obviously in control of the client actions
-    "ClientSendRRQ", "ClientCrash", "ClientRecvOACKthenSendAck",
+    "ClientSendRRQ", "ClientRecvOACKthenSendAck",
     "ClientRecvOACKthenSendError", "ClientRecvDATA",
-    "ClientRecvErrorAndCloseConn",
+    "ClientRecvErrorAndCloseConn", "ClientSendError", "ClientCrash",
     # also, the tester controls passage of time
     "AdvanceClock",
     # these actions have to be handled by the tester as well,

@@ -6,7 +6,6 @@
 
  TODO: add support for WRQ transfers.
  TODO: the clients should retransmit their last packets on timeout.
- TODO: the clients may send ERROR packets.
 
  Igor Konnov, 2025
  *)
@@ -525,19 +524,45 @@ ClientRecvErrorAndCloseConn(_udp) ==
     /\ UNCHANGED <<packets, serverTransfers, clock>>
 
 \* The server sends an ERROR packet, for some reason.
-\* @type: $udpPacket => Bool;
-ServerSendERROR(_udp) ==
+\* @type: (<<Str, Int>>, Int) => Bool;
+ServerSendERROR(_ipPort, _errorCode) ==
     ServerSendError::
-    /\ _udp.srcIp = SERVER_IP
-    /\ <<_udp.destIp, _udp.destPort>> \in DOMAIN serverTransfers
+    LET udp == [
+        srcIp |-> SERVER_IP,
+        srcPort |-> serverTransfers[_ipPort].port,
+        destIp |-> _ipPort[1],
+        destPort |-> _ipPort[2],
+        payload |-> ERROR(_errorCode)
+    ] IN
+    /\ _ipPort \in DOMAIN serverTransfers
     \* remove the transfer entry on the server side
     /\ serverTransfers' = [
-            p \in DOMAIN serverTransfers \ { <<_udp.destIp, _udp.destPort>> } |->
+            p \in DOMAIN serverTransfers \ { _ipPort } |->
                 serverTransfers[p]
         ]
-    /\ lastAction' = ActionRecvSend(_udp)
-    /\ packets' = packets \union {_udp}
+    /\ lastAction' = ActionRecvSend(udp)
+    /\ packets' = packets \union {udp}
     /\ UNCHANGED <<clientTransfers, clock>>
+
+\* A client sends an ERROR packet and forgets the connection.
+\* @type: (<<Str, Int>>, Int) => Bool;
+ClientSendERROR(_ipPort, _errorCode) ==
+    ClientSendError::
+    LET udp == [
+        srcIp |-> _ipPort[1],
+        srcPort |-> _ipPort[2],
+        destIp |-> SERVER_IP,
+        destPort |-> clientTransfers[_ipPort].port,
+        payload |-> ERROR(_errorCode)
+    ] IN
+    /\ _ipPort \in DOMAIN clientTransfers
+    /\ LET transfer == clientTransfers[_ipPort] IN
+        /\ clientTransfers' = [ p \in DOMAIN clientTransfers \ { _ipPort } |->
+                clientTransfers[p]
+            ]
+    /\ lastAction' = ActionRecvSend(udp)
+    /\ packets' = packets \union {udp}
+    /\ UNCHANGED <<serverTransfers, clock>>
 
 (********************* Ignore outdated packets ***************************)
 
@@ -623,6 +648,8 @@ Next ==
             \/ ClientRecvDATA(udp)
             \/ ClientRecvOACK(udp)
             \/ ClientRecvErrorAndCloseConn(udp)
+    \/  \E ipPort \in DOMAIN serverTransfers, errorCode \in DOMAIN ALL_ERRORS:
+            ClientSendERROR(ipPort, errorCode)
     \/  \E ipPort \in DOMAIN clientTransfers:
             ClientCrash(ipPort)
     \* the server
@@ -634,14 +661,8 @@ Next ==
             \/ ServerRecvErrorAndCloseConn(udp)
             \/ ServerSendDup(udp)
     \/  ServerSendInvalid
-    \/  \E portIp \in DOMAIN serverTransfers, errorCode \in DOMAIN ALL_ERRORS:
-            ServerSendERROR([
-                srcIp |-> SERVER_IP,
-                srcPort |-> serverTransfers[portIp].port,
-                destIp |-> portIp[1],
-                destPort |-> portIp[2],
-                payload |-> ERROR(errorCode)
-            ])
+    \/  \E ipPort \in DOMAIN serverTransfers, errorCode \in DOMAIN ALL_ERRORS:
+            ServerSendERROR(ipPort, errorCode)
     \* handle the clock
     \/  \E delta \in 1..255:
             AdvanceClock(delta)
