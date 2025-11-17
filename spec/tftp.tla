@@ -6,6 +6,7 @@
 
  TODO: add support for WRQ transfers.
  TODO: the clients should retransmit their last packets on timeout.
+ TODO: the clients may send ERROR packets.
 
  Igor Konnov, 2025
  *)
@@ -231,7 +232,7 @@ _ServerSendErrorOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
                 payload |-> ERROR(errorCode)
             ]
         IN
-        /\  packets' = packets \union {errorPacket}
+        /\ packets' = packets \union {errorPacket}
         /\ lastAction' = ActionRecvSend(errorPacket)
         \* do not introduce a new transfer entry on error
         /\  UNCHANGED <<serverTransfers, clientTransfers, clock>>
@@ -246,6 +247,10 @@ ServerRecvRRQ(_udp) ==
             clientIpAndPort == <<_udp.srcIp, _udp.srcPort>> IN
         \* the server allocates a new port for the connection, if it can find one
         \E newServerPort \in PORTS:
+            \* This condition is disabled, as tftpd-hpa reuses ports after a 5-6 retries.
+            \* It's hard to write a precise condition on this.
+            \* Uncomment to see how tftpd-hpa violates this requirement.
+            (*
             /\  \* the server allocates a new port for the connection, if it can find one
                 \/  \A p \in DOMAIN serverTransfers:
                         \/ serverTransfers[p].port /= newServerPort
@@ -257,6 +262,7 @@ ServerRecvRRQ(_udp) ==
                     /\ IsERROR(packet.payload)
                     /\ packet.destIp = SERVER_IP
                     /\ packet.destPort = newServerPort
+            *)
             \* According to RFC 2347, the server may respond with DATA or OACK
             /\  \/ _ServerSendDataOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
                 \/ _ServerSendOackOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
@@ -521,7 +527,24 @@ ClientRecvErrorAndCloseConn(_udp) ==
     /\ lastAction' = ActionRecvClose(_udp)
     /\ UNCHANGED <<packets, serverTransfers, clock>>
 
+\* The server sends an ERROR packet, for some reason.
+\* @type: $udpPacket => Bool;
+ServerSendERROR(_udp) ==
+    ServerSendError::
+    /\ _udp.srcIp = SERVER_IP
+    /\ <<_udp.destIp, _udp.destPort>> \in DOMAIN serverTransfers
+    \* remove the transfer entry on the server side
+    /\ serverTransfers' = [
+            p \in DOMAIN serverTransfers \ { <<_udp.destIp, _udp.destPort>> } |->
+                serverTransfers[p]
+        ]
+    /\ lastAction' = ActionRecvSend(_udp)
+    /\ packets' = packets \union {_udp}
+    /\ UNCHANGED <<clientTransfers, clock>>
+
 (********************* Ignore outdated packets ***************************)
+
+\* The server resends a duplicate packet that it sent in the past.
 \* @type: $udpPacket => Bool;
 ServerSendDup(_udp) ==
     ServerSendDup::
@@ -614,7 +637,15 @@ Next ==
             \/ ServerRecvErrorAndCloseConn(udp)
             \/ ServerSendDup(udp)
     \/  ServerSendInvalid
-    \* handle the clock and timeouts
+    \/  \E portIp \in DOMAIN serverTransfers, errorCode \in DOMAIN ALL_ERRORS:
+            ServerSendERROR([
+                srcIp |-> SERVER_IP,
+                srcPort |-> serverTransfers[portIp].port,
+                destIp |-> portIp[1],
+                destPort |-> portIp[2],
+                payload |-> ERROR(errorCode)
+            ])
+    \* handle the clock
     \/  \E delta \in 1..255:
             AdvanceClock(delta)
 
