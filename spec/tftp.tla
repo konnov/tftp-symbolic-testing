@@ -531,6 +531,36 @@ ServerSendDup(_udp) ==
     /\ lastAction' = ActionRecvSend(_udp)
     /\ UNCHANGED <<packets, serverTransfers, clientTransfers, clock>>
 
+\* The server sends an invalid OACK or DATA.
+\* For example, the server may send outdated packets from previous transfers.
+\* @type: Bool;
+ServerSendInvalid ==
+    ServerSendInvalid::
+    /\ \E destIp \in CLIENT_IPS, srcPort, destPort \in PORTS:
+        \/ \E filename \in DOMAIN FILES, timeout \in 1..255:
+                \E tsize \in Nat, blksize \in 0..65464:
+                    \E optionKeys \in SUBSET OPTIONS_RFC2349:
+                        LET options ==
+                            mk_options(optionKeys, blksize, tsize, timeout)
+                            udp == [srcIp |-> SERVER_IP,
+                                    srcPort |-> srcPort,
+                                    destIp |-> destIp,
+                                    destPort |-> destPort,
+                                    payload |-> OACK(options)]
+                        IN
+                        /\ <<destIp, destPort>> \notin DOMAIN serverTransfers
+                        /\ lastAction' = ActionRecvSend(udp)
+        \/ \E blockNum \in Nat, dataSize \in Nat:
+            LET dataPacket == [srcIp |-> SERVER_IP,
+                                srcPort |-> srcPort,
+                                destIp |-> destIp,
+                                destPort |-> destPort,
+                                payload |-> DATA(blockNum, dataSize)]
+            IN
+            /\ <<destIp, destPort>> \notin DOMAIN serverTransfers
+            /\ lastAction' = ActionRecvSend(dataPacket)
+    /\ UNCHANGED <<packets, serverTransfers, clientTransfers, clock>>
+
 (******************************* Time ***********************************)
 
 \* Advance the global clock by some delta in the range [1, 255].
@@ -596,6 +626,7 @@ Next ==
             \/ ServerSendDup(udp)
     \/  \E ipPort \in DOMAIN serverTransfers:
             ServerTimeout(ipPort)
+    \/  ServerSendInvalid
     \* handle the clock and timeouts
     \/  \E delta \in 1..255:
             AdvanceClock(delta)

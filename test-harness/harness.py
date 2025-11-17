@@ -416,9 +416,9 @@ class TftpTestHarness:
 
         if tag == 'DATA':
             return ['ServerRecvRRQthenSendData', 'ServerSendDATA',
-                    'ServerResendDATA', 'ServerSendDup']
+                    'ServerResendDATA', 'ServerSendDup', 'ServerSendInvalid']
         elif tag == 'OACK':
-            return ['ServerRecvRRQthenSendOack', 'ServerSendDup']
+            return ['ServerRecvRRQthenSendOack', 'ServerSendDup', 'ServerSendInvalid']
         elif tag == 'ERROR':
             return ['ServerRecvRRQthenSendError', 'ServerSendDup']
         # TODO: handle 'ACK' when we deal with WRQ
