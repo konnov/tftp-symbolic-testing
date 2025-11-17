@@ -24,10 +24,7 @@ CONSTANTS
     PORTS,
     \* The filenames that can be read/written, mapped to their sizes in bytes.
     \* @type: Str -> Int;
-    FILES,
-    \* Whether RFC 1350-style connections without options are allowed.
-    \* @type: Bool;
-    RFC1350_CONNECTION_ALLOWED
+    FILES
 
 VARIABLES
     \* The set of UDP packets in the system.
@@ -256,7 +253,7 @@ ServerRecvRRQ(_udp) ==
                         \/ serverTransfers[p].port /= newServerPort
                         \* FIX #6: allow reusing ports from completed transfers
                         \/ serverTransfers[p].transferred = serverTransfers[p].tsize
-                \* Or, there was an ERROR packet that cancelled the active transfer.
+                \* FIX #5: Or, there was an ERROR packet that cancelled the active transfer.
                 \* This has a bad smell, but is needed to conform tftpd-hpa.
                 \/ \E packet \in packets:
                     /\ IsERROR(packet.payload)
