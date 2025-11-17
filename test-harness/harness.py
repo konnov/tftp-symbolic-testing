@@ -129,14 +129,14 @@ class ActionRecvSend:
 TESTER_ACTION_LABELS = frozenset([
     "Init",
     # the tester is obviously in control of the client actions
-    "ClientSendRRQ", "ClientTimeout", "ClientRecvOACKthenSendAck",
+    "ClientSendRRQ", "ClientCrash", "ClientRecvOACKthenSendAck",
     "ClientRecvOACKthenSendError", "ClientRecvDATA",
     "ClientRecvErrorAndCloseConn",
     # also, the tester controls passage of time
     "AdvanceClock",
     # these actions have to be handled by the tester as well,
     # as they are not related to the feedback from the SUT
-    "ServerTimeout", "ServerRecvAckAndCloseConn", "ServerRecvErrorAndCloseConn"
+    "ServerRecvAckAndCloseConn", "ServerRecvErrorAndCloseConn"
 ])
 
 TESTER = "tester"
@@ -650,7 +650,7 @@ class TftpTestHarness:
                 else:
                     # TODO: Handle other combinations (DATA→ACK, etc.)
                     self.log.warning(f"  Unhandled send: ... → {sent_payload_type}")
-            elif action_tag in ['ActionRecvClose', 'ActionServerTimeout']:
+            elif action_tag in ['ActionRecvClose']:
                 # This action is handled by the spec and SUT separately
                 self.log.info(f"No TFTP operation for {action_tag}")
                 pass
@@ -914,6 +914,8 @@ class TftpTestHarness:
                                 self.log.error("Failed to assume lastAction before after querying it from the model")
                                 stop_test = True
                                 break
+                            # save the current snapshot to remember the decision!
+                            self.current_snapshot = assume_result.snapshot_id
                             # Execute the corresponding TFTP operation
                             self.execute_sut_operation(next_trans["index"], last_action)
                     elif turn == SUT:

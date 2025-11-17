@@ -232,7 +232,7 @@ def parse_log_file(log_file: str) -> List[Dict[str, Any]]:
                             action_data['payload']['delta'] = int(delta_match.group(1))
 
                         entries.append(action_data)
-                    elif action_tag in ['ActionClientTimeout', 'ActionServerTimeout']:
+                    elif action_tag in ['ActionClientCrash']:
                         # Timeout actions are self-events for specific participants
                         action_data = {}
                         action_data['payloadTag'] = action_tag
@@ -499,7 +499,7 @@ def generate_mermaid_diagram(entries: List[Dict[str, Any]]) -> str:
 
             if ip and port is not None:
                 participant_id = participant_map.get((ip, port), get_participant_id(ip, port))
-                timeout_type = 'Client Timeout' if payload_tag == 'ActionClientTimeout' else 'Server Timeout'
+                timeout_type = 'Client Crash' if payload_tag == 'ActionClientCrash' else 'Server Timeout'
                 lines.append(f"    {participant_id}->>{participant_id}: ⏱ {timeout_type}")
 
         elif entry_type == 'global_action':

@@ -4,6 +4,9 @@
  We maintain the specification close to the RFCs 1350, 2347-2349.
  The timeouts are prescribed in RFCs 1123 and 2349.
 
+ TODO: add support for WRQ transfers.
+ TODO: the clients should retransmit their last packets on timeout.
+
  Igor Konnov, 2025
  *)
 EXTENDS Naturals, Sequences, FiniteSets, Apalache, util, typedefs
@@ -290,8 +293,6 @@ ClientRecvOACK(_udp) ==
                 payload |-> ACK(0)
             ]
         IN
-        \* do not receive packets if the connection must timeout
-        /\  clock <= transfer.timestamp + transfer.timeout
         \* the OACK packet is received right after RRQ (RFC 2347)
         /\  transfer.blockNum = 0
         /\  \/  ClientRecvOACKthenSendAck::
@@ -371,8 +372,6 @@ ClientRecvDATA(_udp) ==
         /\ ~RFC1350_CONNECTION_ALLOWED => ~isFirstPacket
         \* make sure that we receive from the correct port
         /\ ~isFirstPacket => (_udp.srcPort = transfer.port)
-        \* do not receive packets if the connection must timeout
-        /\ clock <= transfer.timestamp + transfer.timeout
         \* receive the block in order
         /\ data.blockNum = transfer.blockNum + 1
         /\ clientTransfers' = [ clientTransfers EXCEPT ![ipPort] = newTransfer ]
@@ -413,8 +412,6 @@ ServerSendDATA(_udp) ==
         /\ _udp.destPort = transfer.port
         \* receive the block in order
         /\ ack.blockNum = transfer.blockNum
-        \* do not receive packets if the connection must timeout
-        /\ clock <= transfer.timestamp + transfer.timeout
         \* either we have more data to send, or we send exactly 0 bytes in the last block
         /\  \/ transfer.tsize > transfer.transferred
             \/ transfer.blockNum * transfer.blksize = transfer.tsize
@@ -446,8 +443,6 @@ ServerResendDATA(_udp) ==
         /\ dataPacket.srcPort = _udp.destPort
         /\ dataPacket.destIp = _udp.srcIp
         /\ dataPacket.destPort = _udp.srcPort
-        \* do not receive packets if the connection must timeout
-        /\ clock <= transfer.timestamp + transfer.timeout
         \* only update the timestamp
         /\ serverTransfers' = [ serverTransfers EXCEPT ![ipPort].timestamp = clock ]
         /\ lastAction' = ActionRecvSend(dataPacket)
@@ -468,8 +463,6 @@ ServerRecvAckAndCloseConn(_udp) ==
         /\ _udp.destPort = transfer.port
         \* receive the block in order
         /\ ack.blockNum = transfer.blockNum
-        \* do not receive packets if the connection must timeout
-        /\ clock <= transfer.timestamp + transfer.timeout
         \* either we have more data to send, or we send exactly 0 bytes in the last block
         /\ transfer.tsize = transfer.transferred
         \* close the connection
@@ -571,28 +564,17 @@ AdvanceClock(delta) ==
     /\ lastAction' = ActionAdvanceClock(delta)
     /\ UNCHANGED <<packets, serverTransfers, clientTransfers>>
 
-\* The server drops a connection due to timeout.
-ServerTimeout(ipPort) ==
-    ServerTimeout::
-    /\ ipPort \in DOMAIN serverTransfers
-    /\ LET transfer == serverTransfers[ipPort] IN
-        /\ clock > transfer.timestamp + transfer.timeout
-        /\ serverTransfers' = [ p \in DOMAIN serverTransfers \ { ipPort } |->
-                serverTransfers[p]
-            ]
-    /\ lastAction' = ActionServerTimeout(ipPort)
-    /\ UNCHANGED <<packets, clientTransfers, clock>>
-
-\* A client drops a connection due to timeout.
-ClientTimeout(ipPort) ==
-    ClientTimeout::
+\* A client crashes and forgets its state.
+\* This is different from ERROR only in that no packet is sent.
+\* @type: <<Str, Int>> => Bool;
+ClientCrash(ipPort) ==
+    ClientCrash::
     /\ ipPort \in DOMAIN clientTransfers
     /\ LET transfer == clientTransfers[ipPort] IN
-        /\ clock > transfer.timestamp + transfer.timeout
         /\ clientTransfers' = [ p \in DOMAIN clientTransfers \ { ipPort } |->
                 clientTransfers[p]
             ]
-    /\ lastAction' = ActionClientTimeout(ipPort)
+    /\ lastAction' = ActionClientCrash(ipPort)
     /\ UNCHANGED <<packets, serverTransfers, clock>>
 
 (********************* The Next-state relation **************************)
@@ -615,7 +597,7 @@ Next ==
             \/ ClientRecvOACK(udp)
             \/ ClientRecvErrorAndCloseConn(udp)
     \/  \E ipPort \in DOMAIN clientTransfers:
-            ClientTimeout(ipPort)
+            ClientCrash(ipPort)
     \* the server
     \/  \E udp \in packets:
             \/ ServerRecvRRQ(udp)
@@ -624,8 +606,6 @@ Next ==
             \/ ServerRecvAckAndCloseConn(udp)
             \/ ServerRecvErrorAndCloseConn(udp)
             \/ ServerSendDup(udp)
-    \/  \E ipPort \in DOMAIN serverTransfers:
-            ServerTimeout(ipPort)
     \/  ServerSendInvalid
     \* handle the clock and timeouts
     \/  \E delta \in 1..255:
