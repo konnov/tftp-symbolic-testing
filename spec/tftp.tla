@@ -185,7 +185,7 @@ _ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
         \* Option Acknowledgment (OACK) to the client.  The specified timeout
         \* value must match the value specified by the client.
         /\ "timeout" \in DOMAIN _rrq.options => timeout = _rrq.options["timeout"]
-        /\ "timeout" \notin DOMAIN _rrq.options => timeout = 255
+        /\ "timeout" \notin DOMAIN _rrq.options => timeout = 1
         \* In Read Request packets, a size of "0" is specified in the request
         \* and the size of the file, in octets, is returned in the OACK.
         /\ "tsize" \in DOMAIN _rrq.options => _rrq.options["tsize"] = 0
@@ -246,19 +246,19 @@ ServerRecvRRQ(_udp) ==
             \* This condition is disabled, as tftpd-hpa reuses ports after a 5-6 retries.
             \* It's hard to write a precise condition on this.
             \* Uncomment to see how tftpd-hpa violates this requirement.
-            (*
             /\  \* the server allocates a new port for the connection, if it can find one
                 \/  \A p \in DOMAIN serverTransfers:
                         \/ serverTransfers[p].port /= newServerPort
                         \* FIX #6: allow reusing ports from completed transfers
                         \/ serverTransfers[p].transferred = serverTransfers[p].tsize
+                        \* FIX #9: allow reusing ports from cancelled transfers
+                        \/ serverTransfers[clientIpAndPort].transferred = 0
                 \* FIX #5: Or, there was an ERROR packet that cancelled the active transfer.
                 \* This has a bad smell, but is needed to conform tftpd-hpa.
                 \/ \E packet \in packets:
                     /\ IsERROR(packet.payload)
                     /\ packet.destIp = SERVER_IP
                     /\ packet.destPort = newServerPort
-            *)
             \* According to RFC 2347, the server may respond with DATA or OACK
             /\  \/ _ServerSendDataOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
                 \/ _ServerSendOackOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
@@ -285,7 +285,7 @@ ClientRecvOACK(_udp) ==
                     \* use the negotiated options, or defaults
                     !.tsize = get_or_else(oack.options, "tsize", -1),
                     !.blksize = get_or_else(oack.options, "blksize", 512),
-                    !.timeout = get_or_else(oack.options, "timeout", 255),
+                    !.timeout = get_or_else(oack.options, "timeout", 1),
                     !.timestamp = clock
                 ]
             \* the ACK packet to send over UDP
