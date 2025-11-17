@@ -14,6 +14,10 @@ OPCODE_ACK == 4
 OPCODE_ERROR == 5
 OPCODE_OACK == 6
 
+\* Protocol level: 1350 without options vs 2347 with options
+PROTO_OPTIONS_NO == "options_no"
+PROTO_OPTIONS_YES == "options_yes"
+
 (*
   // TFTP Packet Types
   @typeAlias: tftpPacket =
@@ -48,6 +52,8 @@ OPCODE_OACK == 6
   // Internal data structure representing an active TFTP transfer (not specified in RFCs).
   // We use the same data structure for both server and client transfers.
   @typeAlias: transfer = {
+    // protocol level used for this transfer
+    proto: Str,
     // the server port allocated for this transfer
     port: Int,
     // the total size of the file being transferred

@@ -74,13 +74,13 @@ Init ==
     /\ serverTransfers = [ ipPort \in {} \X {} |-> [
                 port |-> 0, blksize |-> 0, tsize |-> 0,
                 timeout |-> 0, blocks |-> <<>>, blockNum |-> 0,
-                timestamp |-> 0, transferred |-> 0
+                timestamp |-> 0, transferred |-> 0, proto |-> ""
             ]
         ]
     /\ clientTransfers = [ ipPort \in {} \X {} |-> [
                 port |-> 0, blksize |-> 0, tsize |-> 0,
                 timeout |-> 0, blocks |-> <<>>, blockNum |-> 0,
-                timestamp |-> 0, transferred |-> 0
+                timestamp |-> 0, transferred |-> 0, proto |-> ""
             ]
         ]
     \* the clock value is not essential here, it could be arbitrary
@@ -103,7 +103,6 @@ ClientSendRRQ(_srcIp, _srcPort, _filename, _options) ==
                 payload |-> rrq]
     IN
     /\ <<_srcIp, _srcPort>> \notin DOMAIN clientTransfers
-    /\ RFC1350_CONNECTION_ALLOWED \/ DOMAIN _options /= {}
     \* RFC-2349: In Read Request packets, a size of "0" is specified in the request...
     /\ "tsize" \in DOMAIN _options => _options["tsize"] = 0
     /\ clientTransfers' = [
@@ -120,7 +119,9 @@ ClientSendRRQ(_srcIp, _srcPort, _filename, _options) ==
                    blocks |-> <<>>,
                    blockNum |-> 0,
                    timestamp |-> clock,
-                   transferred |-> 0
+                   transferred |-> 0,
+                   proto |->
+                    IF DOMAIN _options = {} THEN PROTO_OPTIONS_NO ELSE PROTO_OPTIONS_YES
                 ]
             ELSE clientTransfers[p]
         ]
@@ -151,7 +152,8 @@ _ServerSendDataOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
                 blocks |-> <<>>,
                 blockNum |-> 1,
                 timestamp |-> clock,
-                transferred |-> dataSize
+                transferred |-> dataSize,
+                proto |-> PROTO_OPTIONS_NO
             ]
         IN
         \* The no-negotiation case of RFC 2347. No options were requested.
@@ -207,7 +209,7 @@ _ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
                 THEN [ port |-> _newServerPort, blksize |-> blksize,
                        tsize |-> FILES[_rrq.filename], timeout |-> timeout,
                        blocks |-> <<>>, blockNum |-> 0, timestamp |-> clock,
-                       transferred |-> 0
+                       transferred |-> 0, proto |-> PROTO_OPTIONS_YES
                     ]
                 ELSE serverTransfers[p]
             ]
@@ -302,6 +304,8 @@ ClientRecvOACK(_udp) ==
                         => (oack.options["blksize"] <= transfer.blksize)
                 /\  ("timeout" \in DOMAIN oack.options)
                         => (oack.options["timeout"] <= transfer.timeout)
+                \* the client must have requested options
+                /\  transfer.proto = PROTO_OPTIONS_YES
                 \* update the transfer table and send the ACK for the received DATA
                 /\  clientTransfers' =
                         [ clientTransfers EXCEPT ![ipPort] = newTransfer ]
@@ -337,8 +341,10 @@ ClientRecvDATA(_udp) ==
     /\ ipPort \in DOMAIN clientTransfers
     /\  LET data == AsDATA(_udp.payload)
             transfer == clientTransfers[ipPort]
-            \* Is it the first packet of the transfer? No OACK was received.
-            isFirstPacket == data.blockNum = 1 /\ transfer.port = 69
+            \* Is it the first packet of the transfer:
+            \*  - There was no option negotiation
+            \*  - The block number is 1
+            isFirstPacket == transfer.proto = PROTO_OPTIONS_NO /\ data.blockNum = 1
             \* update the transfer state on the client side
             newTransfer ==
                 IF ~isFirstPacket
@@ -352,7 +358,7 @@ ClientRecvDATA(_udp) ==
                     \* since no options were negotiated, we use the defaults
                     !.tsize = -1,       \* transfer size is unknown
                     !.blksize = 512,    \* default block size
-                    !.timeout = 255,    \* default timeout
+                    !.timeout = 1,      \* default timeout
                     !.blocks = Append(@, data.data),
                     !.blockNum = data.blockNum,
                     !.timestamp = clock,
@@ -367,9 +373,6 @@ ClientRecvDATA(_udp) ==
                 payload |-> ACK(data.blockNum)
             ]
         IN
-        \* if RFC 1350-style connections without options are disabled,
-        \* then we do not interpret DATA(1) as a new connection
-        /\ ~RFC1350_CONNECTION_ALLOWED => ~isFirstPacket
         \* make sure that we receive from the correct port
         /\ ~isFirstPacket => (_udp.srcPort = transfer.port)
         \* receive the block in order
@@ -412,6 +415,8 @@ ServerSendDATA(_udp) ==
         /\ _udp.destPort = transfer.port
         \* receive the block in order
         /\ ack.blockNum = transfer.blockNum
+        \* only react to ACK(0), if we had options negotiated
+        /\ ack.blockNum = 0 => transfer.proto = PROTO_OPTIONS_YES
         \* either we have more data to send, or we send exactly 0 bytes in the last block
         /\  \/ transfer.tsize > transfer.transferred
             \/ transfer.blockNum * transfer.blksize = transfer.tsize
@@ -526,6 +531,8 @@ ServerSendDup(_udp) ==
 
 \* The server sends an invalid OACK or DATA.
 \* For example, the server may send outdated packets from previous transfers.
+\* Since we may receive packets out of order, the packet may be not the last
+\* one that the server sent.
 \* @type: Bool;
 ServerSendInvalid ==
     ServerSendInvalid::
@@ -554,7 +561,7 @@ ServerSendInvalid ==
             /\ lastAction' = ActionRecvSend(dataPacket)
     /\ UNCHANGED <<packets, serverTransfers, clientTransfers, clock>>
 
-(******************************* Time ***********************************)
+(*************************** Time and faults *******************************)
 
 \* Advance the global clock by some delta in the range [1, 255].
 \* The choice of the interval is dictated by the TFTP timeout option range.
