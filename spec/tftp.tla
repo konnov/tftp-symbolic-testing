@@ -556,6 +556,8 @@ ClientSendERROR(_ipPort, _errorCode) ==
         payload |-> ERROR(_errorCode)
     ] IN
     /\ _ipPort \in DOMAIN clientTransfers
+    \* do not send ERROR before OACK or DATA
+    /\ clientTransfers[_ipPort].port /= 69
     /\ LET transfer == clientTransfers[_ipPort] IN
         /\ clientTransfers' = [ p \in DOMAIN clientTransfers \ { _ipPort } |->
                 clientTransfers[p]
