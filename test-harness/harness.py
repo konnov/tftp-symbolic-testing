@@ -648,6 +648,40 @@ class TftpTestHarness:
                             self.log.warning("  No response from Docker client")
                     else:
                         self.log.warning("  Docker manager not initialized, skipping actual operation")
+                # Handle RRQ sent (client sends or retransmits read request)
+                elif sent_payload_type == 'RRQ':
+                    self.log.info("  → Client sends RRQ to server")
+
+                    if self.docker:
+                        # Extract packet details
+                        src_ip = sent_packet.srcIp
+                        src_port = sent_packet.srcPort
+                        rrq_payload = sent_packet.payload
+
+                        # Extract RRQ details
+                        filename = rrq_payload.filename
+                        mode = rrq_payload.mode
+                        options = rrq_payload.options
+
+                        # Build RRQ command for Docker client
+                        command = {
+                            'type': 'rrq',
+                            'filename': filename,
+                            'mode': mode,
+                            'options': dict(options) if hasattr(options, 'items') else {},
+                            'source_port': src_port
+                        }
+
+                        self.log.info(f"  Sending RRQ command to client: {command}")
+                        response = self.docker.send_command_to_client(src_ip, command)
+
+                        if response:
+                            if 'error' in response:
+                                self.log.error(f"  ✗ Error from Docker client: {response['error']}")
+                        else:
+                            self.log.warning("  No response from Docker client")
+                    else:
+                        self.log.warning("  Docker manager not initialized, skipping actual operation")
                 else:
                     # TODO: Handle other combinations (DATA→ACK, etc.)
                     self.log.warning(f"  Unhandled send: ... → {sent_payload_type}")
