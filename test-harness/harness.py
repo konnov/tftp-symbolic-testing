@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from itf_py import Trace, itf_variant, trace_from_json, value_to_json
 
-from client import (
+from apalache_rpc.client import (
     JsonRpcClient,
     AssumptionDisabled,
     AssumptionEnabled,
@@ -37,7 +37,7 @@ from client import (
     TransitionDisabled,
 )
 from docker_manager import DockerManager
-from server import ApalacheServer
+from apalache_rpc.server import ApalacheServer
 
 
 class ImmutableDict(frozendict):

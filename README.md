@@ -1,6 +1,10 @@
 # Symbolic Testing of TFTP with Apalache
 
-This repository demonstrates **symbolic testing** of the Trivial File Transfer Protocol (TFTP) using the [Apalache model checker](https://apalache-mc.org/). The approach combines formal specification in TLA+ with automated test generation to systematically explore protocol behaviors and validate implementations.
+This repository demonstrates **symbolic testing** of the [Trivial File Transfer
+Protocol][TFTP] (TFTP) using the [Apalache model checker][Apalache]. The
+approach combines formal specification in TLA<sup>+</sup> with automated test
+generation to systematically explore protocol behaviors and validate
+implementations.
 
 This repository accompanies my talk at Nvidia FM Week 2025. For professional
 consulting, verification reports, or adaptation of these methods, see
@@ -18,7 +22,12 @@ consulting, verification reports, or adaptation of these methods, see
 
 ## TLA+ Specification
 
-The specification models the TFTP protocol as defined in **RFC 1350** (basic TFTP) and **RFCs 2347-2349** (option extensions). It focuses on **read requests (RRQ)** and implements option negotiation for block size, transfer size, and timeout values.
+The specification models the TFTP protocol as defined in [**RFC 1350**][RFC
+1350] (basic TFTP), [RFC 2347][], [RFC 2348][], [RFC 2349][] (option
+extensions), and [RFC 1123][] (clarifying timeouts and standard issues). This
+specification focuses on
+**read requests (RRQ)** and implements option negotiation for block size,
+transfer size, and timeout values.
 
 ### What It Specifies
 
@@ -28,14 +37,15 @@ The specification models:
 - **Read transfers** with block-by-block data transmission
 - **Option negotiation** (OACK packets) for `blksize`, `tsize`, and `timeout`
 - **Timeout and retransmission** behavior using a global synchronized clock
-- **Error conditions** including option negotiation failures, invalid operations, and unknown transfer IDs
+- **Error conditions** including option negotiation failures, invalid operations,
+  and unknown transfer IDs
 - **Packet loss and reordering** through non-deterministic symbolic execution
 - **Duplicate packet handling** (both client and server retransmissions)
 
 ### Assumptions and Scope
 
 **Assumptions:**
-- Clients only perform read operations (RRQ); write requests (WRQ) are not modeled
+- Clients only perform read operations (RRQ); write requests (WRQ) are not modeled yet
 - Global synchronized clock for timeout modeling (RFC 1123, RFC 2349)
 - UDP packet delivery is modeled symbolically (packets may arrive, be lost, or arrive out of order)
 - File contents are abstracted as sizes in bytes; actual data is not modeled
@@ -133,13 +143,13 @@ The harness orchestrates three components:
 
 **Main classes:**
 - `TftpTestHarness`: Orchestrates the entire testing process
-  - `execute_sut_operation()`: Run actual TFTP operations
-  - `generate_test_run()`: Create one symbolic test execution
-  - `setup_logging()`: Configure per-run logging
-  - `start_apalache()`: Start Apalache server
-  - `load_specification()`: Load TLA+ spec via JSON-RPC
-  - `setup_docker()`: Initialize Docker environment
-  - `save_test_run()`: Save traces, logs, and results
+  - `execute_sut_operation`: Run actual TFTP operations
+  - `generate_test_run`: Create one symbolic test execution
+  - `setup_logging`: Configure per-run logging
+  - `start_apalache`: Start Apalache server
+  - `load_specification`: Load TLA+ spec via JSON-RPC
+  - `setup_docker`: Initialize Docker environment
+  - `save_test_run`: Save traces, logs, and results
 
 #### `docker_manager.py`
 **Docker orchestration** for TFTP server and clients.
@@ -184,7 +194,7 @@ Docker image configuration:
 
 #### `pyproject.toml`
 Poetry project configuration:
-- Dependencies: `requests`, `itf-py`, `orjson`, `frozendict`
+- Dependencies: `requests`, `itf-py`, `apalache-rpc-client`, `orjson`, `frozendict`
 - Python 3.9+
 - Development tools configuration
 
@@ -194,16 +204,23 @@ Poetry project configuration:
 
 ### Prerequisites
 
-1. **Install Apalache**: Download from [apalache-mc.org](https://apalache-mc.org/) and ensure `apalache-mc` is in PATH
+1. **Install Apalache**: Pull a docker image:
+   ```bash
+   docker pull ghcr.io/apalache-mc/apalache
+   ```
+
 2. **Install Docker**: Required for running TFTP server and clients
 3. **Install Python 3.9+**: Required for test harness
 
 ### Installation
 
 ```bash
-# Install dependencies
+# Create and activate virtual environment
+pyenv virtualenv 3.13.3 tftp-symbolic-testing
+pyenv activate tftp-symbolic-testing
+
+# Install dependencies with poetry
 cd test-harness
-pip install requests itf-py orjson frozendict
 
 # Or use Poetry
 poetry install
@@ -229,7 +246,7 @@ To execute actual TFTP operations against a real server:
 
 ```bash
 cd test-harness
-python harness.py --tests 5 --steps 50 --docker
+python harness.py --tests 10 --steps 100 --docker
 ```
 
 **What happens:**
@@ -370,7 +387,7 @@ Batch convert all ITF JSON traces to Mermaid diagrams.
 - **Operating System**: Linux, macOS, or WSL2 on Windows
 - **Python**: 3.9 or higher
 - **Docker**: 20.10 or higher
-- **Apalache**: Latest version from [apalache-mc.org](https://apalache-mc.org/)
+- **Apalache**: Latest version from [apalache-mc.org][]
 - **Memory**: 4GB RAM minimum (8GB recommended for larger test runs)
 
 ### Python Dependencies
@@ -455,7 +472,15 @@ Nvidia FM Week 2025.
 
 ## License
 
-See LICENSE file for details.
+See [LICENSE](./LICENSE) file for details.
 
 [konnov.phd]: https://konnov.phd
 [protocols-made-fun.com]: https://protocols-made-fun.com
+[TFTP]: https://en.wikipedia.org/wiki/Trivial_File_Transfer_Protocol
+[Apalache]: https://apalache-mc.org/
+[apalache-mc.org]: https://apalache-mc.org/
+[RFC 1350]: https://datatracker.ietf.org/doc/html/rfc1350
+[RFC 2347]: https://datatracker.ietf.org/doc/html/rfc2347
+[RFC 2348]: https://datatracker.ietf.org/doc/html/rfc2348
+[RFC 2349]: https://datatracker.ietf.org/doc/html/rfc2349
+[RFC 1123]: https://datatracker.ietf.org/doc/html/rfc1123
