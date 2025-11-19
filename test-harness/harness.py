@@ -305,6 +305,10 @@ class TftpTestHarness:
 
         # Initialize Docker manager
         self.docker = DockerManager(str(self.spec_dir.parent / "test-harness"))
+        
+        # Ensure docker_manager logs propagate to root logger and thus to our file handlers
+        docker_logger = logging.getLogger('docker_manager')
+        docker_logger.propagate = True  # This is True by default, but being explicit
 
         # Set up Docker (build image, create network, start containers)
         if not self.docker.setup():
@@ -826,7 +830,6 @@ class TftpTestHarness:
 
         Args:
             max_steps: Maximum number of steps in the test run
-            max_retries: Maximum retries per step to find an enabled transition
 
         Returns:
             True if test run was successfully generated
@@ -834,24 +837,7 @@ class TftpTestHarness:
         if not self.client or not self.spec_params:
             raise RuntimeError("Client or spec_params not initialized")
 
-        # Set up logging for this test run
-        # Increment run number and create directory
-        self.test_run_number += 1
-        run_dir = self.get_run_dir()
-        run_dir.mkdir(parents=True, exist_ok=True)
-
-        # Add a file handler for this specific test run
-        run_log_file = run_dir / "python_harness.log"
-        run_handler = logging.FileHandler(run_log_file)
-        run_handler.setLevel(logging.INFO)
-        run_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-
-        # Get the root logger and add the handler
-        root_logger = logging.getLogger()
-        root_logger.addHandler(run_handler)
-        self.run_log_handlers.append(run_handler)
-
-        self.log.info(f"=== Starting test run generation {self.test_run_number} (max {max_steps} steps) ===")
+        # Note: Per-run logging is set up in run() before calling this method
 
         # Initialize with a random init transition
         self.sut_feedback_to_process = set()
@@ -1051,6 +1037,25 @@ class TftpTestHarness:
                 self.log.info(f"\n{'='*60}")
                 self.log.info(f"Generating test run {i + 1}/{num_tests}")
                 self.log.info(f"{'='*60}")
+
+                # Set up per-run logging BEFORE any test run operations
+                # Increment run number and create directory
+                self.test_run_number += 1
+                run_dir = self.get_run_dir()
+                run_dir.mkdir(parents=True, exist_ok=True)
+
+                # Add a file handler for this specific test run
+                run_log_file = run_dir / "python_harness.log"
+                run_handler = logging.FileHandler(run_log_file)
+                run_handler.setLevel(logging.INFO)
+                run_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+                # Get the root logger and add the handler
+                root_logger = logging.getLogger()
+                root_logger.addHandler(run_handler)
+                self.run_log_handlers.append(run_handler)
+
+                self.log.info(f"=== Starting test run generation {self.test_run_number} (max {max_steps} steps) ===")
 
                 # Rollback to initial state for each new test
                 if self.client and self.spec_params:
