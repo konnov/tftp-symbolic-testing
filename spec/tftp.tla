@@ -687,8 +687,8 @@ Next ==
     (*
     \/  \E ipPort \in DOMAIN clientTransfers:
             \/ ClientCrash(ipPort)
+    *)
     \/ \E udp \in packets:
         ClientSendDup(udp)
-    *)
 
 ===============================================================================
