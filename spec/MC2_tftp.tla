@@ -21,7 +21,7 @@ VARIABLES
     packets,
     \* TFTP serverConnections as handled by the server.
     \* Mapping from (client IP, client port) to server port.
-    \* @type: <<Str, Int>> -> $transfer;
+    \* @type: <<Str, Int, Int>> -> $transfer;
     serverTransfers,
     \* TFTP client transfers as handled by a client.
     \* Mapping from (client IP, client port) to the transfer data structure.
@@ -37,7 +37,7 @@ VARIABLES
 
 INSTANCE tftp
 
-\* @type: << <<Str, Int>> -> $transfer, <<Str, Int>> -> $transfer >>;
+\* @type: << <<Str, Int, Int>> -> $transfer, <<Str, Int>> -> $transfer >>;
 View == << serverTransfers, clientTransfers>>
 
 (* Abstract transfer records to small equivalence classes.
@@ -66,17 +66,23 @@ AbsTransfer(t) ==
     ]
 
 \* Compute the measure as the max of block numbers of all transfers.
+\* @type: (<<Str, Int, Int>> -> $transfer) => Int;
+MeasureS(t) ==
+    LET MaxS(S) == ApaFoldSet(LAMBDA x, y: Max(x, y), 0, S) IN
+    MaxS({ t[ipPort].blockNum : ipPort \in DOMAIN t })
+
+\* Compute the measure as the max of block numbers of all transfers.
 \* @type: (<<Str, Int>> -> $transfer) => Int;
-Measure(t) ==
+MeasureC(t) ==
     LET MaxS(S) == ApaFoldSet(LAMBDA x, y: Max(x, y), 0, S) IN
     MaxS({ t[ipPort].blockNum : ipPort \in DOMAIN t })
 
 \* Use the number of transferred blocks as the measure for computing
 \* the fitness function. The rest of the view is used for filtering
 \* similar states.
-\* @type: << Int, <<Str, Int>> -> $absTransfer, <<Str, Int>> -> $absTransfer >>;
+\* @type: << Int, <<Str, Int, Int>> -> $absTransfer, <<Str, Int>> -> $absTransfer >>;
 MeasureView == <<
-    (1 + Measure(serverTransfers) + Measure(clientTransfers)) * 10,
+    (1 + MeasureS(serverTransfers) + MeasureC(clientTransfers)) * 10,
     [ p \in DOMAIN serverTransfers |-> AbsTransfer(serverTransfers[p]) ],
     [ p \in DOMAIN clientTransfers |-> AbsTransfer(clientTransfers[p]) ]
 >>
@@ -86,7 +92,7 @@ MeasureView == <<
 \* similar states.
 \* @type: << Int >>;
 OnlyMeasureView == <<
-    (1 + Measure(serverTransfers) + Measure(clientTransfers)) * 10
+    (1 + MeasureS(serverTransfers) + MeasureC(clientTransfers)) * 10
 >>
 
 \* Count the image cardinalities (Parikh image) combined with a map.
@@ -100,7 +106,7 @@ CountImg(f) ==
 \* similar states.
 \* @type: << Int, Int, Int, (Int -> Int), (Int -> Int) >>;
 MeasureAndPacketsView == <<
-    (1 + Measure(serverTransfers) + Measure(clientTransfers)) * 10,
+    (1 + MeasureS(serverTransfers) + MeasureC(clientTransfers)) * 10,
     \* restrict the number of the RRQ and ERROR packets to reduce noise
     Min(Cardinality({ p \in packets: IsRRQ(p.payload) }), 4),
     Min(Cardinality({ p \in packets: IsERROR(p.payload) }), 5),
@@ -115,7 +121,7 @@ CountImgAndMap(f, map(_)) ==
     LET V == {f[id]: id \in DOMAIN f} IN
     [ v \in V |-> map(Cardinality({ id \in DOMAIN f: f[id] = v }))]
 
-\* @type: << <<Str, Int>> -> $absTransfer, <<Str, Int>> -> $absTransfer >>;
+\* @type: << <<Str, Int, Int>> -> $absTransfer, <<Str, Int>> -> $absTransfer >>;
 AbsView == <<
     [ p \in DOMAIN serverTransfers |-> AbsTransfer(serverTransfers[p]) ],
     [ p \in DOMAIN clientTransfers |-> AbsTransfer(clientTransfers[p]) ]
@@ -132,7 +138,7 @@ TwoUdpPacketsEx ==
 OneDataPacketEx ==
     ~(\E p \in packets: IsDATA(p.payload))
 
-\* Check this falsy invariant to see an example of a client receiving 2 blocks.
+\* Check this falsy invariant to see an example of a client receiving 1 block.
 RecvOneDataBlockEx ==
     ~(\E p \in DOMAIN clientTransfers:
         Len(clientTransfers[p].blocks) >= 1)

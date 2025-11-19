@@ -131,7 +131,8 @@ TESTER_ACTION_LABELS = frozenset([
     # the tester is obviously in control of the client actions
     "ClientSendRRQ", "ClientRecvOACKthenSendAck",
     "ClientRecvOACKthenSendError", "ClientRecvDATA",
-    "ClientRecvErrorAndCloseConn", "ClientSendError", "ClientCrash",
+    "ClientRecvErrorAndCloseConn", "ClientSendError",
+    "ClientCrash", "ClientSendDup",
     # also, the tester controls passage of time
     "AdvanceClock",
     # these actions have to be handled by the tester as well,

@@ -5,7 +5,8 @@
  The timeouts are prescribed in RFCs 1123 and 2349.
 
  TODO: add support for WRQ transfers.
- TODO: the clients should retransmit their last packets on timeout.
+ TODO: the clients should retransmit their last packets on timeout
+       (we have dups which are more general).
 
  Igor Konnov, 2025
  *)
@@ -30,8 +31,9 @@ VARIABLES
     \* @type: Set($udpPacket);
     packets,
     \* TFTP transfers as handled by the server (not specified in the RFCs).
-    \* Mapping from (client IP, client port) to the transfer data structure.
-    \* @type: <<Str, Int>> -> $transfer;
+    \* Mapping from (client IP, client port, server port) to the transfer
+    \* data structure.
+    \* @type: <<Str, Int, Int>> -> $transfer;
     serverTransfers,
     \* TFTP client transfers as handled by a client (not specified in the RFCs).
     \* Mapping from (client IP, client port) to the transfer data structure.
@@ -68,7 +70,7 @@ ALL_ERRORS ==
 Init ==
     Init::
     /\ packets = {}
-    /\ serverTransfers = [ ipPort \in {} \X {} |-> [
+    /\ serverTransfers = [ ipPortPort \in {} \X {} \X {} |-> [
                 port |-> 0, blksize |-> 0, tsize |-> 0,
                 timeout |-> 0, blocks |-> <<>>, blockNum |-> 0,
                 timestamp |-> 0, transferred |-> 0, proto |-> ""
@@ -106,19 +108,16 @@ ClientSendRRQ(_srcIp, _srcPort, _filename, _options) ==
             p \in DOMAIN clientTransfers \union {<<_srcIp, _srcPort>>} |->
             IF p = <<_srcIp, _srcPort>>
             THEN [ port |-> 69, \* initial port before negotiation
-                   blksize |-> IF "blksize" \in DOMAIN _options
-                               THEN _options["blksize"]
-                               ELSE 512,
                    tsize |-> 0,
-                   timeout |-> IF "timeout" \in DOMAIN _options
-                               THEN _options["timeout"]
-                               ELSE 0,
+                   blksize |-> get_or_else(_options, "blksize", 512),
+                   timeout |-> get_or_else(_options, "timeout", 1),
                    blocks |-> <<>>,
                    blockNum |-> 0,
                    timestamp |-> clock,
                    transferred |-> 0,
                    proto |->
-                    IF DOMAIN _options = {} THEN PROTO_OPTIONS_NO ELSE PROTO_OPTIONS_YES
+                    IF DOMAIN _options = {}
+                    THEN PROTO_OPTIONS_NO ELSE PROTO_OPTIONS_YES
                 ]
             ELSE clientTransfers[p]
         ]
@@ -152,13 +151,14 @@ _ServerSendDataOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
                 transferred |-> dataSize,
                 proto |-> PROTO_OPTIONS_NO
             ]
+            triple == <<_clientIpAndPort[1], _clientIpAndPort[2], _newServerPort>>
         IN
         \* The no-negotiation case of RFC 2347. No options were requested.
         /\  DOMAIN _rrq.options = {}
         /\  packets' = packets \union { dataPacket }
         /\  serverTransfers' = [
-                p \in DOMAIN serverTransfers \union {_clientIpAndPort} |->
-                IF p = _clientIpAndPort
+                p \in DOMAIN serverTransfers \union {triple} |->
+                IF p = triple
                 THEN newTransfer
                 ELSE serverTransfers[p]
             ]
@@ -197,19 +197,20 @@ _ServerSendOackOnRrq(_rrq, _clientIpAndPort, _newServerPort, _rcvdPacket) ==
                     destIp |-> _clientIpAndPort[1], destPort |-> _clientIpAndPort[2],
                     payload |-> OACK(oackOptions)
                 ]
+                triple == <<_clientIpAndPort[1], _clientIpAndPort[2], _newServerPort>>
             IN
-            /\ packets' = packets \union {oackPacket}
-            /\ lastAction' = ActionRecvSend(oackPacket)
-        /\  serverTransfers' = [
-                p \in DOMAIN serverTransfers \union {_clientIpAndPort} |->
-                IF p = _clientIpAndPort
-                THEN [ port |-> _newServerPort, blksize |-> blksize,
-                       tsize |-> FILES[_rrq.filename], timeout |-> timeout,
-                       blocks |-> <<>>, blockNum |-> 0, timestamp |-> clock,
-                       transferred |-> 0, proto |-> PROTO_OPTIONS_YES
-                    ]
-                ELSE serverTransfers[p]
-            ]
+            /\  packets' = packets \union {oackPacket}
+            /\  lastAction' = ActionRecvSend(oackPacket)
+            /\  serverTransfers' = [
+                    p \in DOMAIN serverTransfers \union {triple} |->
+                    IF p = triple
+                    THEN [ port |-> _newServerPort, blksize |-> blksize,
+                        tsize |-> FILES[_rrq.filename], timeout |-> timeout,
+                        blocks |-> <<>>, blockNum |-> 0, timestamp |-> clock,
+                        transferred |-> 0, proto |-> PROTO_OPTIONS_YES
+                        ]
+                    ELSE serverTransfers[p]
+                ]
         /\ UNCHANGED <<clientTransfers, clock>>
 
 \* Utility action: Send ERROR in response to RRQ, as per RFC 1350 and RFC 2347.
@@ -243,22 +244,26 @@ ServerRecvRRQ(_udp) ==
             clientIpAndPort == <<_udp.srcIp, _udp.srcPort>> IN
         \* the server allocates a new port for the connection, if it can find one
         \E newServerPort \in PORTS:
-            \* This condition is disabled, as tftpd-hpa reuses ports after a 5-6 retries.
+            \* tftpd-hpa reuses ports after a 5-6 retries.
             \* It's hard to write a precise condition on this.
-            \* Uncomment to see how tftpd-hpa violates this requirement.
-            /\  \* the server allocates a new port for the connection, if it can find one
-                \/  \A p \in DOMAIN serverTransfers:
-                        \/ serverTransfers[p].port /= newServerPort
-                        \* FIX #6: allow reusing ports from completed transfers
-                        \/ serverTransfers[p].transferred = serverTransfers[p].tsize
-                        \* FIX #9: allow reusing ports from cancelled transfers
-                        \/ serverTransfers[clientIpAndPort].transferred = 0
+            /\  LET triple == <<_udp.srcIp, _udp.srcPort, newServerPort>> IN
+                \* this is a new transfer triple
+                \/ triple \notin DOMAIN serverTransfers
                 \* FIX #5: Or, there was an ERROR packet that cancelled the active transfer.
                 \* This has a bad smell, but is needed to conform tftpd-hpa.
+                \* What if our server starts answering RRQs multiple times?
+                \* We need session numbers or something similar.
                 \/ \E packet \in packets:
                     /\ IsERROR(packet.payload)
                     /\ packet.destIp = SERVER_IP
                     /\ packet.destPort = newServerPort
+                    /\ packet.srcIp = _udp.srcIp
+                    /\ packet.srcPort = _udp.srcPort
+                \* FIX #6: allow reusing ports from completed transfers
+                \/ \E older \in DOMAIN serverTransfers:
+                    /\ older[3] = newServerPort
+                    /\ older[1] /= _udp.srcIp \/ older[2] /= _udp.srcPort
+                    /\ serverTransfers[older].transferred = serverTransfers[older].tsize
             \* According to RFC 2347, the server may respond with DATA or OACK
             /\  \/ _ServerSendDataOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
                 \/ _ServerSendOackOnRrq(rrq, clientIpAndPort, newServerPort, _udp)
@@ -299,6 +304,8 @@ ClientRecvOACK(_udp) ==
         IN
         \* the OACK packet is received right after RRQ (RFC 2347)
         /\  transfer.blockNum = 0
+        \* FIX #14: disallow receiving another OACK, when already negotiated
+        /\  transfer.port = 69
         /\  \/  ClientRecvOACKthenSendAck::
                 \* the nominal case: accept OACK and send ACK for block 0
                 \* However, check that the server behaves as per RFC 2347.
@@ -390,12 +397,12 @@ ClientRecvDATA(_udp) ==
 \* @type: $udpPacket => Bool;
 ServerSendDATA(_udp) ==
     ServerSendDATA::
-    LET ipPort == <<_udp.srcIp, _udp.srcPort>> IN
+    LET triple == <<_udp.srcIp, _udp.srcPort, _udp.destPort>> IN
     /\ IsACK(_udp.payload)
     /\ _udp.destIp = SERVER_IP
-    /\ ipPort \in DOMAIN serverTransfers
+    /\ triple \in DOMAIN serverTransfers
     /\  LET ack == AsACK(_udp.payload)
-            transfer == serverTransfers[ipPort]
+            transfer == serverTransfers[triple]
             dataSize == Min(transfer.blksize,
                              transfer.tsize - transfer.transferred)
             \* update the transfer state on the server side
@@ -422,7 +429,7 @@ ServerSendDATA(_udp) ==
         \* either we have more data to send, or we send exactly 0 bytes in the last block
         /\  \/ transfer.tsize > transfer.transferred
             \/ transfer.blockNum * transfer.blksize = transfer.tsize
-        /\ serverTransfers' = [ serverTransfers EXCEPT ![ipPort] = newTransfer ]
+        /\ serverTransfers' = [ serverTransfers EXCEPT ![triple] = newTransfer ]
         \* send the DATA for the next block
         /\ packets' = packets \union { dataPacket }
         /\ lastAction' = ActionRecvSend(dataPacket)
@@ -430,17 +437,18 @@ ServerSendDATA(_udp) ==
 
 \* The server receives an ACK packet and resends DATA that it sent in the past.
 \* This is to fix the mismatch found by the test harness.
+\* TODO: remove in favor of ServerSendDup?
 \* @type: $udpPacket => Bool;
 ServerResendDATA(_udp) ==
     ServerResendDATA::
-    LET ipPort == <<_udp.srcIp, _udp.srcPort>> IN
+    LET triple == <<_udp.srcIp, _udp.srcPort, _udp.destPort>> IN
     /\ IsACK(_udp.payload)
     /\ _udp.destIp = SERVER_IP
-    /\ ipPort \in DOMAIN serverTransfers
+    /\ triple \in DOMAIN serverTransfers
     /\  \E dataPacket \in packets:
         LET ack == AsACK(_udp.payload)
             data == AsDATA(dataPacket.payload)
-            transfer == serverTransfers[ipPort]
+            transfer == serverTransfers[triple]
         IN
         \* make sure that we receive from the correct port
         /\ _udp.destPort = transfer.port
@@ -451,7 +459,7 @@ ServerResendDATA(_udp) ==
         /\ dataPacket.destIp = _udp.srcIp
         /\ dataPacket.destPort = _udp.srcPort
         \* only update the timestamp
-        /\ serverTransfers' = [ serverTransfers EXCEPT ![ipPort].timestamp = clock ]
+        /\ serverTransfers' = [ serverTransfers EXCEPT ![triple].timestamp = clock ]
         /\ lastAction' = ActionRecvSend(dataPacket)
     /\ UNCHANGED <<packets, clientTransfers, clock>>
 
@@ -459,12 +467,12 @@ ServerResendDATA(_udp) ==
 \* @type: $udpPacket => Bool;
 ServerRecvAckAndCloseConn(_udp) ==
     ServerRecvAckAndCloseConn::
-    LET ipPort == <<_udp.srcIp, _udp.srcPort>> IN
+    LET triple == <<_udp.srcIp, _udp.srcPort, _udp.destPort>> IN
     /\ IsACK(_udp.payload)
     /\ _udp.destIp = SERVER_IP
-    /\ ipPort \in DOMAIN serverTransfers
+    /\ triple \in DOMAIN serverTransfers
     /\  LET ack == AsACK(_udp.payload)
-            transfer == serverTransfers[ipPort]
+            transfer == serverTransfers[triple]
         IN
         \* make sure that we receive from the correct port
         /\ _udp.destPort = transfer.port
@@ -473,7 +481,7 @@ ServerRecvAckAndCloseConn(_udp) ==
         \* either we have more data to send, or we send exactly 0 bytes in the last block
         /\ transfer.tsize = transfer.transferred
         \* close the connection
-        /\ serverTransfers' = [ p \in DOMAIN serverTransfers \ { ipPort } |->
+        /\ serverTransfers' = [ p \in DOMAIN serverTransfers \ { triple } |->
                 serverTransfers[p]
             ]
     /\ lastAction' = ActionRecvClose(_udp)
@@ -485,18 +493,18 @@ ServerRecvAckAndCloseConn(_udp) ==
 \* @type: $udpPacket => Bool;
 ServerRecvErrorAndCloseConn(_udp) ==
     ServerRecvErrorAndCloseConn::
-    LET ipPort == <<_udp.srcIp, _udp.srcPort>> IN
+    LET triple == <<_udp.srcIp, _udp.srcPort, _udp.destPort>> IN
     /\  IsERROR(_udp.payload)
     /\  _udp.destIp = SERVER_IP
-    /\  ipPort \in DOMAIN serverTransfers
+    /\  triple \in DOMAIN serverTransfers
     /\  LET error == AsERROR(_udp.payload)
-            transfer == serverTransfers[ipPort]
+            transfer == serverTransfers[triple]
         IN
         \* make sure that we receive from the correct port
         /\ _udp.destPort = transfer.port
         \* close the connection
         /\ serverTransfers' = [
-                p \in DOMAIN serverTransfers \ { ipPort } |->
+                p \in DOMAIN serverTransfers \ { triple } |->
                     serverTransfers[p]
             ]
     /\ lastAction' = ActionRecvClose(_udp)
@@ -524,25 +532,25 @@ ClientRecvErrorAndCloseConn(_udp) ==
     /\ UNCHANGED <<packets, serverTransfers, clock>>
 
 \* The server sends an ERROR packet, for some reason.
-\* @type: (<<Str, Int>>, Int) => Bool;
-ServerSendERROR(_ipPort, _errorCode) ==
+\* @type: (<<Str, Int, Int>>, Int) => Bool;
+ServerSendERROR(_triple, _errorCode) ==
     ServerSendError::
-    LET udp == [
-        srcIp |-> SERVER_IP,
-        srcPort |-> serverTransfers[_ipPort].port,
-        destIp |-> _ipPort[1],
-        destPort |-> _ipPort[2],
-        payload |-> ERROR(_errorCode)
-    ] IN
-    /\ _ipPort \in DOMAIN serverTransfers
-    \* remove the transfer entry on the server side
-    /\ serverTransfers' = [
-            p \in DOMAIN serverTransfers \ { _ipPort } |->
-                serverTransfers[p]
-        ]
-    /\ lastAction' = ActionRecvSend(udp)
-    /\ packets' = packets \union {udp}
-    /\ UNCHANGED <<clientTransfers, clock>>
+    /\ _triple \in DOMAIN serverTransfers
+    /\  LET udp == [
+            srcIp |-> SERVER_IP,
+            srcPort |-> _triple[3],
+            destIp |-> _triple[1],
+            destPort |-> _triple[2],
+            payload |-> ERROR(_errorCode)
+        ] IN
+        \* remove the transfer entry on the server side
+        /\ serverTransfers' = [
+                p \in DOMAIN serverTransfers \ { _triple } |->
+                    serverTransfers[p]
+            ]
+        /\ lastAction' = ActionRecvSend(udp)
+        /\ packets' = packets \union {udp}
+        /\ UNCHANGED <<clientTransfers, clock>>
 
 \* A client sends an ERROR packet and forgets the connection.
 \* @type: (<<Str, Int>>, Int) => Bool;
@@ -595,7 +603,7 @@ ServerSendInvalid ==
                                     destPort |-> destPort,
                                     payload |-> OACK(options)]
                         IN
-                        /\ <<destIp, destPort>> \notin DOMAIN serverTransfers
+                        /\ <<destIp, destPort, srcPort>> \notin DOMAIN serverTransfers
                         /\ lastAction' = ActionRecvSend(udp)
         \/ \E blockNum \in Nat, dataSize \in Nat:
             LET dataPacket == [srcIp |-> SERVER_IP,
@@ -604,7 +612,7 @@ ServerSendInvalid ==
                                 destPort |-> destPort,
                                 payload |-> DATA(blockNum, dataSize)]
             IN
-            /\ <<destIp, destPort>> \notin DOMAIN serverTransfers
+            /\ <<destIp, destPort, srcPort>> \notin DOMAIN serverTransfers
             /\ lastAction' = ActionRecvSend(dataPacket)
     /\ UNCHANGED <<packets, serverTransfers, clientTransfers, clock>>
 
@@ -631,6 +639,15 @@ ClientCrash(ipPort) ==
     /\ lastAction' = ActionClientCrash(ipPort)
     /\ UNCHANGED <<packets, serverTransfers, clock>>
 
+\* A client resends a duplicate packet that it sent in the past.
+\* This is to test for the Sourcerer's Apprentice syndrome.
+\* @type: $udpPacket => Bool;
+ClientSendDup(_udp) ==
+    ClientSendDup::
+    /\ _udp.destIp = SERVER_IP
+    /\ lastAction' = ActionRecvSend(_udp)
+    /\ UNCHANGED <<packets, serverTransfers, clientTransfers, clock>>
+
 (********************* The Next-state relation **************************)
 
 Next ==
@@ -650,10 +667,8 @@ Next ==
             \/ ClientRecvDATA(udp)
             \/ ClientRecvOACK(udp)
             \/ ClientRecvErrorAndCloseConn(udp)
-    \/  \E ipPort \in DOMAIN serverTransfers, errorCode \in DOMAIN ALL_ERRORS:
-            ClientSendERROR(ipPort, errorCode)
-    \/  \E ipPort \in DOMAIN clientTransfers:
-            ClientCrash(ipPort)
+    \/  \E triple \in DOMAIN serverTransfers, errorCode \in DOMAIN ALL_ERRORS:
+            ClientSendERROR(<<triple[1], triple[2]>>, errorCode)
     \* the server
     \/  \E udp \in packets:
             \/ ServerRecvRRQ(udp)
@@ -668,5 +683,12 @@ Next ==
     \* handle the clock
     \/  \E delta \in 1..255:
             AdvanceClock(delta)
+    \* crashes and duplicates
+    (*
+    \/  \E ipPort \in DOMAIN clientTransfers:
+            \/ ClientCrash(ipPort)
+    \/ \E udp \in packets:
+        ClientSendDup(udp)
+    *)
 
 ===============================================================================
