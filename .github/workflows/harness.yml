@@ -38,7 +38,7 @@ jobs:
     
     - name: Run test harness
       working-directory: ./test-harness
-      run: poetry run python harness.py --docker --steps=10 --tests=10
+      run: poetry run python harness.py --docker --steps=50 --tests=10
     
     - name: Install Node.js for Mermaid CLI
       if: always()
