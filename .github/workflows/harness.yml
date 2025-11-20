@@ -40,12 +40,41 @@ jobs:
       working-directory: ./test-harness
       run: poetry run python harness.py --docker --steps=10 --tests=10
     
+    - name: Install Node.js for Mermaid CLI
+      if: always()
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Install Mermaid CLI
+      if: always()
+      run: npm install -g @mermaid-js/mermaid-cli
+    
+    - name: Install Playwright dependencies for Mermaid
+      if: always()
+      run: npx playwright install --with-deps chromium
+    
+    - name: Render log trace diagrams
+      if: always()
+      working-directory: ./test-harness
+      run: |
+        mkdir -p diagrams
+        ../scripts/render_log_traces.sh test-results diagrams
+    
     - name: Upload test results
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: test-results
         path: test-harness/test-results/
+        retention-days: 7
+    
+    - name: Upload diagrams
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: diagrams
+        path: test-harness/diagrams/
         retention-days: 7
     
     - name: Upload logs
