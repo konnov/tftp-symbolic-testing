@@ -37,7 +37,7 @@ from apalache_rpc.client import (
     TransitionDisabled,
 )
 from docker_manager import DockerManager
-from apalache_rpc.server import ApalacheServer
+import subprocess
 
 
 class ImmutableDict(frozendict):
@@ -282,22 +282,84 @@ class TftpTestHarness:
         return last_action
 
     def start_apalache(self, hostname: str = "localhost", port: int = 8822):
-        """Start the Apalache server."""
-        self.log.info("Starting Apalache server...")
-        self.server = ApalacheServer(str(self.log_dir), hostname, port)
+        """Start the Apalache server using Docker."""
+        self.log.info("Starting Apalache server via Docker...")
 
-        if not self.server.start_server():
-            self.log.error("Failed to start Apalache server")
+        # Get the absolute path to the test-harness directory
+        harness_dir_abs = (self.spec_dir.parent / "test-harness").resolve()
+
+        # Docker run command for Apalache server
+        docker_cmd = [
+            "docker", "run",
+            "--rm",  # Remove container when stopped
+            "-d",    # Run in detached mode
+            "--name", "apalache-server",  # Named container for easy management
+            "-v", f"{harness_dir_abs}:/var/apalache",  # Mount test-harness directory
+            "-p", f"{port}:{port}",  # Expose port
+            "ghcr.io/apalache-mc/apalache:latest",
+            "server",
+            "--server-type=explorer",
+            f"--port={port}"
+        ]
+
+        try:
+            # Start the Docker container
+            result = subprocess.run(
+                docker_cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            container_id = result.stdout.strip()
+            self.log.info(f"Apalache server container started: {container_id[:12]}")
+
+            # Store container info for cleanup
+            self.server = {
+                'container_id': container_id,
+                'hostname': hostname,
+                'port': port
+            }
+
+            # Wait a bit for the server to be ready
+            self.log.info("Waiting for Apalache server to be ready...")
+            time.sleep(3)
+
+            self.log.info("Apalache server started successfully")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            self.log.error(f"Failed to start Apalache server: {e.stderr}")
+            return False
+        except Exception as e:
+            self.log.error(f"Error starting Apalache server: {e}", exc_info=True)
             return False
 
-        self.log.info("Apalache server started successfully")
-        return True
-
     def stop_apalache(self):
-        """Stop the Apalache server."""
+        """Stop the Apalache Docker container."""
         if self.server:
             self.log.info("Stopping Apalache server...")
-            self.server.stop_server()
+            try:
+                subprocess.run(
+                    ["docker", "stop", "apalache-server"],
+                    capture_output=True,
+                    check=True,
+                    timeout=10
+                )
+                self.log.info("Apalache server stopped")
+            except subprocess.CalledProcessError as e:
+                self.log.warning(f"Error stopping Apalache server: {e.stderr}")
+            except subprocess.TimeoutExpired:
+                self.log.warning("Timeout stopping Apalache server, forcing removal...")
+                try:
+                    subprocess.run(
+                        ["docker", "rm", "-f", "apalache-server"],
+                        capture_output=True,
+                        check=True
+                    )
+                except Exception as e:
+                    self.log.error(f"Failed to force remove container: {e}")
+            except Exception as e:
+                self.log.error(f"Error stopping Apalache server: {e}")
 
     def setup_docker(self) -> bool:
         """Set up the Docker environment for TFTP testing."""
@@ -305,7 +367,7 @@ class TftpTestHarness:
 
         # Initialize Docker manager
         self.docker = DockerManager(str(self.spec_dir.parent / "test-harness"))
-        
+
         # Ensure docker_manager logs propagate to root logger and thus to our file handlers
         docker_logger = logging.getLogger('docker_manager')
         docker_logger.propagate = True  # This is True by default, but being explicit

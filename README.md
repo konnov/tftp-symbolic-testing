@@ -59,9 +59,9 @@ The specification models:
 
 ### Specification Files
 
-Located in `spec/`:
+Located in [`spec/`](./spec):
 
-#### `tftp.tla`
+#### [`tftp.tla`](./spec/tftp.tla)
 The main specification module defining the TFTP protocol behavior.
 
 **Constants:**
@@ -87,7 +87,7 @@ The main specification module defining the TFTP protocol behavior.
 - `ServerTimeout/ClientCrash`: Timeout and crash handling
 - `AdvanceClock`: Time progression
 
-#### `MC2_tftp.tla`
+#### [`MC2_tftp.tla`](./spec/MC2_tftp.tla)
 Model checking configuration for Apalache with concrete parameter values.
 
 **Configuration:**
@@ -98,7 +98,7 @@ Model checking configuration for Apalache with concrete parameter values.
 
 Defines view abstraction (`MeasureView`) to reduce state space by abstracting transfer details.
 
-#### `typedefs.tla`
+#### [`typedefs.tla`](./spec/typedefs.tla)
 Type definitions for Apalache type checking.
 
 Defines structured types for:
@@ -107,7 +107,7 @@ Defines structured types for:
 - Transfer state (`$transfer`)
 - Actions (`$action`) including all protocol operations
 
-#### `util.tla`
+#### [`util.tla`](./spec/util.tla)
 Utility operators:
 - `SetAsFun`: Convert set of pairs to TLA+ function
 - `mk_options`: Create option map for TFTP option negotiation
@@ -116,7 +116,7 @@ Utility operators:
 
 ## Test Harness
 
-The test harness located in `test-harness/` generates concrete test cases by exploring symbolic executions of the TLA+ specification using Apalache's JSON-RPC API.
+The test harness located in [`test-harness/`](./test-harness) generates concrete test cases by exploring symbolic executions of the TLA+ specification using Apalache's JSON-RPC API.
 
 ### Architecture Overview
 
@@ -128,7 +128,7 @@ The harness orchestrates three components:
 
 ### Core Components
 
-#### `harness.py`
+#### [`harness.py`](./test-harness/harness.py)
 **Main test orchestrator** that coordinates symbolic execution and test generation.
 
 **Key responsibilities:**
@@ -151,7 +151,7 @@ The harness orchestrates three components:
   - `setup_docker`: Initialize Docker environment
   - `save_test_run`: Save traces, logs, and results
 
-#### `docker_manager.py`
+#### [`docker_manager.py`](./test-harness/docker_manager.py)
 **Docker orchestration** for TFTP server and clients.
 
 **Responsibilities:**
@@ -168,7 +168,7 @@ The harness orchestrates three components:
 - **Server**: `172.20.0.10:69` (TFTP), ports 1024-1027 (data transfers)
 - **Clients**: `172.20.0.11`, `172.20.0.12` with control port 5000
 
-#### `tftp_client_docker.py`
+#### [`tftp_client_docker.py`](./test-harness/tftp_client_docker.py)
 **TFTP client** running inside Docker containers.
 
 **Functionality:**
@@ -184,7 +184,7 @@ The harness orchestrates three components:
 - `error`: Send error packet
 - `get_packets`: Retrieve buffered packets from server
 
-#### `Dockerfile`
+#### [`Dockerfile`](./test-harness/Dockerfile)
 Docker image configuration:
 - Base: Ubuntu with tftp-hpa server
 - Python 3 with required libraries
@@ -192,7 +192,7 @@ Docker image configuration:
 - TFTP server with syslog logging
 - Client control script
 
-#### `pyproject.toml`
+#### [`pyproject.toml`](./test-harness/pyproject.toml)
 Poetry project configuration:
 - Dependencies: `requests`, `itf-py`, `apalache-rpc-client`, `orjson`, `frozendict`
 - Python 3.9+
@@ -227,8 +227,6 @@ pyenv activate tftp-symbolic-testing
 
 # Install dependencies with poetry
 cd test-harness
-
-# Or use Poetry
 poetry install
 ```
 
@@ -295,9 +293,9 @@ test-results/
 
 ## Visualization Scripts
 
-Located in `scripts/`, these tools help analyze and visualize test results.
+Located in [`scripts/`](./scripts), these tools help analyze and visualize test results.
 
-### `log_to_mermaid.py`
+### [`log_to_mermaid.py`](./scripts/log_to_mermaid.py)
 
 Convert test harness logs to Mermaid sequence diagrams.
 
@@ -319,7 +317,7 @@ python scripts/log_to_mermaid.py test-harness/test-results/run_0001/python_harne
 
 **Output:** Mermaid diagram showing complete message flow with participants, packets, and timing.
 
-### `itf_to_mermaid.py`
+### [`itf_to_mermaid.py`](./scripts/itf_to_mermaid.py)
 
 Convert ITF JSON traces to Mermaid sequence diagrams.
 
@@ -336,7 +334,7 @@ python scripts/itf_to_mermaid.py test-harness/test-results/run_0001/divergence_t
 
 **When to use:** Analyzing symbolic execution traces, especially when tests diverge from the specification.
 
-### `log_to_plot.py`
+### [`log_to_plot.py`](./scripts/log_to_plot.py)
 
 Analyze timing from test harness logs and produce stacked bar charts.
 
@@ -364,7 +362,7 @@ python scripts/log_to_plot.py test-harness/test-results --output timing_plot.png
 
 ### Shell Scripts
 
-#### `render_log_traces.sh`
+#### [`render_log_traces.sh`](./scripts/render_log_traces.sh)
 
 Batch convert all log files to Mermaid diagrams and render as PNG.
 
@@ -375,7 +373,7 @@ Batch convert all log files to Mermaid diagrams and render as PNG.
 
 Requires: `mmdc` (Mermaid CLI) for rendering diagrams to PNG.
 
-#### `render_itf_traces.sh`
+#### [`render_itf_traces.sh`](./scripts/render_itf_traces.sh)
 
 Batch convert all ITF JSON traces to Mermaid diagrams.
 
