@@ -1,0 +1,38 @@
+name: Check TLA+ Specification
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  check-spec:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Pull Apalache Docker image
+      run: docker pull ghcr.io/apalache-mc/apalache:latest
+    
+    - name: Run Apalache check (expecting error)
+      run: |
+        set +e  # Don't exit on error
+        docker run --rm \
+          -v ${{ github.workspace }}/spec:/var/apalache \
+          ghcr.io/apalache-mc/apalache:latest \
+          check --inv=RecvOneDataBlockEx MC2_tftp.tla
+        
+        EXIT_CODE=$?
+        
+        # Apalache returns non-zero when it finds an error (which we expect)
+        if [ $EXIT_CODE -ne 0 ]; then
+          echo "✓ Apalache found an error as expected"
+          exit 0
+        else
+          echo "✗ Apalache did not find an error (unexpected)"
+          exit 1
+        fi

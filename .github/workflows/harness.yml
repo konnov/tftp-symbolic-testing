@@ -1,0 +1,57 @@
+name: Test Harness
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-harness:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+    
+    - name: Install Poetry
+      run: |
+        curl -sSL https://install.python-poetry.org | python3 -
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    
+    - name: Install Python dependencies
+      working-directory: ./test-harness
+      run: poetry install
+    
+    - name: Pull Apalache Docker image
+      run: docker pull ghcr.io/apalache-mc/apalache:latest
+    
+    - name: Build TFTP Docker image
+      working-directory: ./test-harness
+      run: docker build -t tftp-test-harness:latest .
+    
+    - name: Run test harness
+      working-directory: ./test-harness
+      run: poetry run python harness.py --docker --steps=10 --tests=10
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: test-harness/test-results/
+        retention-days: 7
+    
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: logs
+        path: test-harness/logs/
+        retention-days: 7
