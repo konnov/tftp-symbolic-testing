@@ -765,11 +765,17 @@ class TftpTestHarness:
         # Get the absolute path to the repository root (parent of test-harness)
         repo_root = self.spec_dir.parent.resolve()
 
+        # Get current user ID and group ID to avoid permission issues in Docker
+        import os
+        uid = os.getuid()
+        gid = os.getgid()
+
         # Docker run command for Apalache server
         docker_cmd = [
             "docker", "run",
             "-d",    # Run in detached mode
             "--name", "apalache-server",  # Named container for easy management
+            "--user", f"{uid}:{gid}",  # Run as current user to avoid permission issues
             "-v", f"{repo_root}:/var/apalache",  # Mount repository root
             "-p", f"{port}:{port}",  # Expose port
             "ghcr.io/apalache-mc/apalache:latest",
