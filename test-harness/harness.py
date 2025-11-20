@@ -768,7 +768,6 @@ class TftpTestHarness:
         # Docker run command for Apalache server
         docker_cmd = [
             "docker", "run",
-            "--rm",  # Remove container when stopped
             "-d",    # Run in detached mode
             "--name", "apalache-server",  # Named container for easy management
             "-v", f"{repo_root}:/var/apalache",  # Mount repository root
@@ -796,6 +795,28 @@ class TftpTestHarness:
                 'hostname': hostname,
                 'port': port
             }
+
+            # Immediately check if container is running and get logs if not
+            time.sleep(1)  # Give it a moment to potentially fail
+            
+            check_result = subprocess.run(
+                ["docker", "inspect", "-f", "{{.State.Running}}", container_id],
+                capture_output=True,
+                text=True
+            )
+            
+            if check_result.returncode != 0 or check_result.stdout.strip() != "true":
+                self.log.error("Apalache container failed to start or exited immediately")
+                # Get container logs
+                logs_result = subprocess.run(
+                    ["docker", "logs", container_id],
+                    capture_output=True,
+                    text=True
+                )
+                self.log.error(f"Container logs:\n{logs_result.stdout}\n{logs_result.stderr}")
+                # Clean up the stopped container
+                subprocess.run(["docker", "rm", container_id], capture_output=True)
+                return False
 
             # Wait for the server to be ready
             self.log.info("Waiting for Apalache server to be ready...")
@@ -852,28 +873,35 @@ class TftpTestHarness:
         """Stop the Apalache Docker container."""
         if self.server:
             self.log.info("Stopping Apalache server...")
-            try:
-                subprocess.run(
-                    ["docker", "stop", "apalache-server"],
-                    capture_output=True,
-                    check=True,
-                    timeout=10
-                )
-                self.log.info("Apalache server stopped")
-            except subprocess.CalledProcessError as e:
-                self.log.warning(f"Error stopping Apalache server: {e.stderr}")
-            except subprocess.TimeoutExpired:
-                self.log.warning("Timeout stopping Apalache server, forcing removal...")
+            container_id = self.server.get('container_id')
+            if container_id:
                 try:
                     subprocess.run(
-                        ["docker", "rm", "-f", "apalache-server"],
+                        ["docker", "stop", container_id],
                         capture_output=True,
-                        check=True
+                        check=True,
+                        timeout=10
                     )
+                    self.log.info("Apalache server stopped")
+                    # Remove the container
+                    subprocess.run(
+                        ["docker", "rm", container_id],
+                        capture_output=True
+                    )
+                except subprocess.CalledProcessError as e:
+                    self.log.warning(f"Error stopping Apalache server: {e.stderr}")
+                except subprocess.TimeoutExpired:
+                    self.log.warning("Timeout stopping Apalache server, forcing removal...")
+                    try:
+                        subprocess.run(
+                            ["docker", "rm", "-f", container_id],
+                            capture_output=True,
+                            check=True
+                        )
+                    except Exception as e:
+                        self.log.error(f"Failed to force remove container: {e}")
                 except Exception as e:
-                    self.log.error(f"Failed to force remove container: {e}")
-            except Exception as e:
-                self.log.error(f"Error stopping Apalache server: {e}")
+                    self.log.error(f"Error stopping Apalache server: {e}")
 
     def setup_docker(self) -> bool:
         """Set up the Docker environment for TFTP testing."""
