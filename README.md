@@ -12,15 +12,15 @@ consulting, verification reports, or adaptation of these methods, see
 
 ## Table of Contents
 
-- [TLA+ Specification](#tla-specification)
-- [Test Harness](#test-harness)
-- [Running Tests](#running-tests)
-- [Visualization Scripts](#visualization-scripts)
-- [Requirements](#requirements)
+- [1. TLA+ Specification](#1-tla-specification)
+- [2. Test Harness](#2-test-harness)
+- [3. Running Tests](#3-running-tests)
+- [4. Visualization Scripts](#4-visualization-scripts)
+- [5. Requirements](#5-requirements)
 
 ---
 
-## TLA+ Specification
+## 1. TLA+ Specification
 
 The specification models the TFTP protocol as defined in [**RFC 1350**][RFC
 1350] (basic TFTP), [RFC 2347][], [RFC 2348][], [RFC 2349][] (option
@@ -29,7 +29,7 @@ specification focuses on
 **read requests (RRQ)** and implements option negotiation for block size,
 transfer size, and timeout values.
 
-### What It Specifies
+### 1.1. What It Specifies
 
 The specification models:
 
@@ -42,7 +42,7 @@ The specification models:
 - **Packet loss and reordering** through non-deterministic symbolic execution
 - **Duplicate packet handling** (both client and server retransmissions)
 
-### Assumptions and Scope
+### 1.2. Assumptions and Scope
 
 **Assumptions:**
 - Clients only perform read operations (RRQ); write requests (WRQ) are not modeled yet
@@ -57,11 +57,11 @@ The specification models:
 - Physical network details (checksums, fragmentation, etc.)
 - Disk I/O operations
 
-### Specification Files
+### 1.3. Specification Files
 
 Located in [`spec/`](./spec):
 
-#### [`tftp.tla`](./spec/tftp.tla)
+#### 1.3.1. [`tftp.tla`](./spec/tftp.tla)
 The main specification module defining the TFTP protocol behavior.
 
 **Constants:**
@@ -87,7 +87,7 @@ The main specification module defining the TFTP protocol behavior.
 - `ServerTimeout/ClientCrash`: Timeout and crash handling
 - `AdvanceClock`: Time progression
 
-#### [`MC2_tftp.tla`](./spec/MC2_tftp.tla)
+#### 1.3.2. [`MC2_tftp.tla`](./spec/MC2_tftp.tla)
 Model checking configuration for Apalache with concrete parameter values.
 
 **Configuration:**
@@ -98,7 +98,7 @@ Model checking configuration for Apalache with concrete parameter values.
 
 Defines view abstraction (`MeasureView`) to reduce state space by abstracting transfer details.
 
-#### [`typedefs.tla`](./spec/typedefs.tla)
+#### 1.3.3. [`typedefs.tla`](./spec/typedefs.tla)
 Type definitions for Apalache type checking.
 
 Defines structured types for:
@@ -107,18 +107,18 @@ Defines structured types for:
 - Transfer state (`$transfer`)
 - Actions (`$action`) including all protocol operations
 
-#### [`util.tla`](./spec/util.tla)
+#### 1.3.4. [`util.tla`](./spec/util.tla)
 Utility operators:
 - `SetAsFun`: Convert set of pairs to TLA+ function
 - `mk_options`: Create option map for TFTP option negotiation
 
 ---
 
-## Test Harness
+## 2. Test Harness
 
 The test harness located in [`test-harness/`](./test-harness) generates concrete test cases by exploring symbolic executions of the TLA+ specification using Apalache's JSON-RPC API.
 
-### Architecture Overview
+### 2.1. Architecture Overview
 
 The harness orchestrates three components:
 
@@ -126,9 +126,9 @@ The harness orchestrates three components:
 2. **Python Orchestrator**: Drives test generation and coordinates execution
 3. **Docker Containers**: Run actual TFTP server (tftp-hpa) and test clients
 
-### Core Components
+### 2.2. Core Components
 
-#### [`harness.py`](./test-harness/harness.py)
+#### 2.2.1. [`harness.py`](./test-harness/harness.py)
 **Main test orchestrator** that coordinates symbolic execution and test generation.
 
 **Key responsibilities:**
@@ -151,7 +151,7 @@ The harness orchestrates three components:
   - `setup_docker`: Initialize Docker environment
   - `save_test_run`: Save traces, logs, and results
 
-#### [`docker_manager.py`](./test-harness/docker_manager.py)
+#### 2.2.2. [`docker_manager.py`](./test-harness/docker_manager.py)
 **Docker orchestration** for TFTP server and clients.
 
 **Responsibilities:**
@@ -168,7 +168,7 @@ The harness orchestrates three components:
 - **Server**: `172.20.0.10:69` (TFTP), ports 1024-1027 (data transfers)
 - **Clients**: `172.20.0.11`, `172.20.0.12` with control port 5000
 
-#### [`tftp_client_docker.py`](./test-harness/tftp_client_docker.py)
+#### 2.2.3. [`tftp_client_docker.py`](./test-harness/tftp_client_docker.py)
 **TFTP client** running inside Docker containers.
 
 **Functionality:**
@@ -184,7 +184,7 @@ The harness orchestrates three components:
 - `error`: Send error packet
 - `get_packets`: Retrieve buffered packets from server
 
-#### [`Dockerfile`](./test-harness/Dockerfile)
+#### 2.2.4. [`Dockerfile`](./test-harness/Dockerfile)
 Docker image configuration:
 - Base: Ubuntu with tftp-hpa server
 - Python 3 with required libraries
@@ -192,7 +192,7 @@ Docker image configuration:
 - TFTP server with syslog logging
 - Client control script
 
-#### [`pyproject.toml`](./test-harness/pyproject.toml)
+#### 2.2.5. [`pyproject.toml`](./test-harness/pyproject.toml)
 Poetry project configuration:
 - Dependencies: `requests`, `itf-py`, `apalache-rpc-client`, `orjson`, `frozendict`
 - Python 3.9+
@@ -200,9 +200,9 @@ Poetry project configuration:
 
 ---
 
-## Running Tests
+## 3. Running Tests
 
-### Prerequisites
+### 3.1. Prerequisites
 
 1. **Install Apalache**: Pull a docker image:
    ```bash
@@ -218,7 +218,7 @@ Poetry project configuration:
 2. **Install Docker**: Required for running TFTP server and clients
 3. **Install Python 3.9+**: Required for test harness
 
-### Installation
+### 3.2. Installation
 
 ```bash
 # Create and activate virtual environment
@@ -230,7 +230,7 @@ cd test-harness
 poetry install
 ```
 
-### Basic Usage
+### 3.3. Basic Usage
 
 Generate test cases without Docker (symbolic execution only):
 
@@ -244,7 +244,7 @@ python harness.py --tests 10 --steps 100
 - `--steps N`: Maximum steps per test run (default: 100)
 - `--docker`: Enable Docker to run actual TFTP operations (optional)
 
-### Running with Docker
+### 3.4. Running with Docker
 
 To execute actual TFTP operations against a real server:
 
@@ -263,7 +263,7 @@ python harness.py --tests 10 --steps 100 --docker
    - Validates server responses against spec
    - Saves results to `test-results/run_NNNN/`
 
-### Output Structure
+### 3.5. Output Structure
 
 Each test run creates a directory `test-results/run_NNNN/` containing:
 
@@ -274,7 +274,7 @@ Each test run creates a directory `test-results/run_NNNN/` containing:
 - **`tftpd_server.log`**: TFTP server container logs (with `--docker`)
 - **`tftpd_syslog.log`**: Server syslog output (with `--docker`)
 
-### Example Output
+### 3.6. Example Output
 
 ```
 test-results/
@@ -291,11 +291,11 @@ test-results/
 
 ---
 
-## Visualization Scripts
+## 4. Visualization Scripts
 
 Located in [`scripts/`](./scripts), these tools help analyze and visualize test results.
 
-### [`log_to_mermaid.py`](./scripts/log_to_mermaid.py)
+### 4.1. [`log_to_mermaid.py`](./scripts/log_to_mermaid.py)
 
 Convert test harness logs to Mermaid sequence diagrams.
 
@@ -317,7 +317,7 @@ python scripts/log_to_mermaid.py test-harness/test-results/run_0001/python_harne
 
 **Output:** Mermaid diagram showing complete message flow with participants, packets, and timing.
 
-### [`itf_to_mermaid.py`](./scripts/itf_to_mermaid.py)
+### 4.2. [`itf_to_mermaid.py`](./scripts/itf_to_mermaid.py)
 
 Convert ITF JSON traces to Mermaid sequence diagrams.
 
@@ -334,7 +334,7 @@ python scripts/itf_to_mermaid.py test-harness/test-results/run_0001/divergence_t
 
 **When to use:** Analyzing symbolic execution traces, especially when tests diverge from the specification.
 
-### [`log_to_plot.py`](./scripts/log_to_plot.py)
+### 4.3. [`log_to_plot.py`](./scripts/log_to_plot.py)
 
 Analyze timing from test harness logs and produce stacked bar charts.
 
@@ -360,9 +360,9 @@ python scripts/log_to_plot.py test-harness/test-results --output timing_plot.png
 
 **Requirements:** `matplotlib`, `numpy`
 
-### Shell Scripts
+### 4.4. Shell Scripts
 
-#### [`render_log_traces.sh`](./scripts/render_log_traces.sh)
+#### 4.4.1. [`render_log_traces.sh`](./scripts/render_log_traces.sh)
 
 Batch convert all log files to Mermaid diagrams and render as PNG.
 
@@ -373,7 +373,7 @@ Batch convert all log files to Mermaid diagrams and render as PNG.
 
 Requires: `mmdc` (Mermaid CLI) for rendering diagrams to PNG.
 
-#### [`render_itf_traces.sh`](./scripts/render_itf_traces.sh)
+#### 4.4.2. [`render_itf_traces.sh`](./scripts/render_itf_traces.sh)
 
 Batch convert all ITF JSON traces to Mermaid diagrams.
 
@@ -384,9 +384,9 @@ Batch convert all ITF JSON traces to Mermaid diagrams.
 
 ---
 
-## Requirements
+## 5. Requirements
 
-### System Requirements
+### 5.1. System Requirements
 
 - **Operating System**: Linux, macOS, or WSL2 on Windows
 - **Python**: 3.9 or higher
@@ -394,7 +394,7 @@ Batch convert all ITF JSON traces to Mermaid diagrams.
 - **Apalache**: Latest version from [apalache-mc.org][]
 - **Memory**: 4GB RAM minimum (8GB recommended for larger test runs)
 
-### Python Dependencies
+### 5.2. Python Dependencies
 
 Core:
 - `requests` - HTTP client for JSON-RPC
@@ -406,7 +406,7 @@ Visualization (optional):
 - `matplotlib` - Plotting library
 - `numpy` - Numerical operations
 
-### Installing Dependencies
+### 5.3. Installing Dependencies
 
 ```bash
 # Using pip
@@ -417,7 +417,7 @@ cd test-harness
 poetry install
 ```
 
-### Docker Image
+### 5.4. Docker Image
 
 The Dockerfile creates an Ubuntu-based image with:
 - `tftp-hpa` server (in.tftpd)
