@@ -96,17 +96,32 @@ while IFS= read -r log_file; do
         
         # Render Mermaid to PNG with neutral theme
         echo "Generating single mermaid chart"
-        echo "  Command: mmdc -i $mmd_file -o $png_file -t neutral -b transparent"
-        if mmdc -i "$mmd_file" -o "$png_file" -t neutral -b transparent 2>&1; then
+        
+        # Determine if we're running in GitHub Actions CI
+        if [ -n "${GITHUB_ACTIONS:-}" ]; then
+            # In GitHub Actions, use --no-sandbox for Chromium
+            echo "  Command: mmdc -i $mmd_file -o $png_file -t neutral -b transparent (with --no-sandbox for CI)"
+            mmdc_result=$(mmdc -i "$mmd_file" -o "$png_file" -t neutral -b transparent --puppeteerConfigFile <(echo '{"args":["--no-sandbox","--disable-setuid-sandbox"]}') 2>&1)
+        else
+            # Locally, use sandbox (default behavior)
+            echo "  Command: mmdc -i $mmd_file -o $png_file -t neutral -b transparent"
+            mmdc_result=$(mmdc -i "$mmd_file" -o "$png_file" -t neutral -b transparent 2>&1)
+        fi
+        
+        mmdc_exit=$?
+        
+        if [ $mmdc_exit -eq 0 ]; then
             # Verify the PNG was created
             if [ -f "$png_file" ]; then
                 echo "  ✓ Rendered PNG: ${png_file}"
                 count=$((count + 1))
             else
                 echo "  ✗ PNG file was not created: ${png_file}" >&2
+                echo "$mmdc_result" >&2
             fi
         else
             echo "  ✗ Failed to render PNG for ${log_file}" >&2
+            echo "$mmdc_result" >&2
         fi
     else
         echo "  ✗ Failed to convert ${log_file} to Mermaid" >&2
