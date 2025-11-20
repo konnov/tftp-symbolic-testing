@@ -74,14 +74,14 @@ while IFS= read -r log_file; do
     # Extract run name (directory name, e.g., run_0001)
     run_name=$(basename "$log_dir")
     
-    # Construct output filename: <run_name>-trace.png
+    # Construct output filename: <run_name>-trace.pdf
     output_name="${run_name}-trace"
     mmd_file="${TEMP_DIR}/${output_name}.mmd"
-    png_file="${OUTPUT_DIR}/${output_name}.png"
+    pdf_file="${OUTPUT_DIR}/${output_name}.pdf"
     
     # Convert log to Mermaid
-    if [ -f "$png_file" ]; then
-        echo "  → Skipping, output already exists: ${png_file}"
+    if [ -f "$pdf_file" ]; then
+        echo "  → Skipping, output already exists: ${pdf_file}"
         continue
     fi
     
@@ -94,33 +94,33 @@ while IFS= read -r log_file; do
             continue
         fi
         
-        # Render Mermaid to PNG with neutral theme
+        # Render Mermaid to PDF with neutral theme
         echo "Generating single mermaid chart"
         
         # Determine if we're running in GitHub Actions CI
         if [ -n "${GITHUB_ACTIONS:-}" ]; then
             # In GitHub Actions, use --no-sandbox for Chromium
-            echo "  Command: mmdc -i $mmd_file -o $png_file -t neutral -b transparent (with --no-sandbox for CI)"
-            mmdc_result=$(mmdc -i "$mmd_file" -o "$png_file" -t neutral -b transparent --puppeteerConfigFile <(echo '{"args":["--no-sandbox","--disable-setuid-sandbox"]}') 2>&1)
+            echo "  Command: mmdc -i $mmd_file -o $pdf_file -t neutral (with --no-sandbox for CI)"
+            mmdc_result=$(mmdc -i "$mmd_file" -o "$pdf_file" -t neutral --puppeteerConfigFile <(echo '{"args":["--no-sandbox","--disable-setuid-sandbox"]}') 2>&1)
         else
             # Locally, use sandbox (default behavior)
-            echo "  Command: mmdc -i $mmd_file -o $png_file -t neutral -b transparent"
-            mmdc_result=$(mmdc -i "$mmd_file" -o "$png_file" -t neutral -b transparent 2>&1)
+            echo "  Command: mmdc -i $mmd_file -o $pdf_file -t neutral"
+            mmdc_result=$(mmdc -i "$mmd_file" -o "$pdf_file" -t neutral 2>&1)
         fi
         
         mmdc_exit=$?
         
         if [ $mmdc_exit -eq 0 ]; then
-            # Verify the PNG was created
-            if [ -f "$png_file" ]; then
-                echo "  ✓ Rendered PNG: ${png_file}"
+            # Verify the PDF was created
+            if [ -f "$pdf_file" ]; then
+                echo "  ✓ Rendered PDF: ${pdf_file}"
                 count=$((count + 1))
             else
-                echo "  ✗ PNG file was not created: ${png_file}" >&2
+                echo "  ✗ PDF file was not created: ${pdf_file}" >&2
                 echo "$mmdc_result" >&2
             fi
         else
-            echo "  ✗ Failed to render PNG for ${log_file}" >&2
+            echo "  ✗ Failed to render PDF for ${log_file}" >&2
             echo "$mmdc_result" >&2
         fi
     else
