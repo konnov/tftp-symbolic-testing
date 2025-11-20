@@ -77,23 +77,36 @@ while IFS= read -r log_file; do
     # Construct output filename: <run_name>-trace.png
     output_name="${run_name}-trace"
     mmd_file="${TEMP_DIR}/${output_name}.mmd"
-    pdf_file="${OUTPUT_DIR}/${output_name}.pdf"
+    png_file="${OUTPUT_DIR}/${output_name}.png"
     
     # Convert log to Mermaid
-    if [ -f "$pdf_file" ]; then
-        echo "  → Skipping, output already exists: ${pdf_file}"
+    if [ -f "$png_file" ]; then
+        echo "  → Skipping, output already exists: ${png_file}"
         continue
     fi
     
     if python3 "$LOG_TO_MERMAID" "$log_file" "$mmd_file" 2>/dev/null; then
         echo "  ✓ Created Mermaid diagram (temp)"
         
-        # Render Mermaid to PDF with neutral theme
-        if mmdc -i "$mmd_file" -o "$pdf_file" -t neutral 2>/dev/null; then
-            echo "  ✓ Rendered PDF: ${pdf_file}"
-            count=$((count + 1))
+        # Verify the mermaid file was actually created
+        if [ ! -f "$mmd_file" ]; then
+            echo "  ✗ Mermaid file was not created: ${mmd_file}" >&2
+            continue
+        fi
+        
+        # Render Mermaid to PNG with neutral theme
+        echo "Generating single mermaid chart"
+        echo "  Command: mmdc -i $mmd_file -o $png_file -t neutral -b transparent"
+        if mmdc -i "$mmd_file" -o "$png_file" -t neutral -b transparent 2>&1; then
+            # Verify the PNG was created
+            if [ -f "$png_file" ]; then
+                echo "  ✓ Rendered PNG: ${png_file}"
+                count=$((count + 1))
+            else
+                echo "  ✗ PNG file was not created: ${png_file}" >&2
+            fi
         else
-            echo "  ✗ Failed to render PDF for ${log_file}" >&2
+            echo "  ✗ Failed to render PNG for ${log_file}" >&2
         fi
     else
         echo "  ✗ Failed to convert ${log_file} to Mermaid" >&2

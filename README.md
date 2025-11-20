@@ -1,5 +1,8 @@
 # Symbolic Testing of TFTP with Apalache
 
+[![Check TLA+ Specification](https://github.com/konnov/tftp-symbolic-testing/actions/workflows/check.yml/badge.svg)](https://github.com/konnov/tftp-symbolic-testing/actions/workflows/check.yml)
+[![Test Harness](https://github.com/konnov/tftp-symbolic-testing/actions/workflows/harness.yml/badge.svg)](https://github.com/konnov/tftp-symbolic-testing/actions/workflows/harness.yml)
+
 This repository demonstrates **symbolic testing** of the [Trivial File Transfer
 Protocol][TFTP] (TFTP) using the [Apalache model checker][Apalache]. The
 approach combines formal specification in TLA<sup>+</sup> with automated test
@@ -9,6 +12,16 @@ implementations.
 This repository accompanies my talk at Nvidia FM Week 2025. For professional
 consulting, verification reports, or adaptation of these methods, see
 [konnov.phd][] and [protocols-made-fun.com][].
+
+## Latest Test Results
+
+The CI automatically runs the test harness and generates visualization diagrams. You can download the latest artifacts from the [Test Harness workflow runs](https://github.com/konnov/tftp-symbolic-testing/actions/workflows/harness.yml):
+
+- **[Test Results](https://github.com/konnov/tftp-symbolic-testing/actions/workflows/harness.yml)** - Complete test execution logs, transitions, and commands
+- **[Diagrams](https://github.com/konnov/tftp-symbolic-testing/actions/workflows/harness.yml)** - Mermaid sequence diagrams showing TFTP message flows
+- **[Logs](https://github.com/konnov/tftp-symbolic-testing/actions/workflows/harness.yml)** - Detailed harness execution logs
+
+*Click on the latest successful workflow run and scroll down to the "Artifacts" section to download.*
 
 ## Table of Contents
 
