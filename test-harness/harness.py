@@ -817,10 +817,25 @@ class TftpTestHarness:
                     )
                     if check_result.stdout.strip() != "true":
                         self.log.error("Apalache container stopped unexpectedly")
+                        # Get container logs to see what went wrong
+                        logs_result = subprocess.run(
+                            ["docker", "logs", container_id],
+                            capture_output=True,
+                            text=True
+                        )
+                        self.log.error(f"Container logs:\n{logs_result.stdout}\n{logs_result.stderr}")
                         return False
                     self.log.info(f"Apalache server still starting... ({elapsed}s)")
-                except subprocess.CalledProcessError:
-                    self.log.error("Failed to check Apalache container status")
+                except subprocess.CalledProcessError as e:
+                    self.log.error(f"Failed to check Apalache container status: {e.stderr}")
+                    # Try to get logs anyway
+                    logs_result = subprocess.run(
+                        ["docker", "logs", container_id],
+                        capture_output=True,
+                        text=True
+                    )
+                    if logs_result.stdout or logs_result.stderr:
+                        self.log.error(f"Container logs:\n{logs_result.stdout}\n{logs_result.stderr}")
                     return False
 
             self.log.info("Apalache server should be ready now")
