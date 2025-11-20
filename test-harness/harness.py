@@ -765,12 +765,15 @@ class TftpTestHarness:
         # Get the absolute path to the repository root (parent of test-harness)
         repo_root = self.spec_dir.parent.resolve()
         
-        # Create tmp directory if it doesn't exist and ensure it's writable
+        # Create directories that Apalache needs with proper permissions
+        import os
         tmp_dir = repo_root / "tmp"
         tmp_dir.mkdir(exist_ok=True)
-        # Make it world-writable so the apalache user in container can use it
-        import os
         os.chmod(tmp_dir, 0o777)
+        
+        apalache_out_dir = repo_root / "_apalache-out"
+        apalache_out_dir.mkdir(exist_ok=True)
+        os.chmod(apalache_out_dir, 0o777)
 
         # Docker run command for Apalache server
         docker_cmd = [
