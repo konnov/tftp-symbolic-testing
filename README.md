@@ -220,13 +220,16 @@ Poetry project configuration:
 
 ### 3.2. Installation
 
+Make sure that you have Python 3.13.3 installed.
+
 ```bash
-# Create and activate virtual environment
+# Create and activate virtual environment (pyenv)
 pyenv virtualenv 3.13.3 tftp-symbolic-testing
 pyenv activate tftp-symbolic-testing
 
 # Install dependencies with poetry
 cd test-harness
+pip3 install poetry
 poetry install
 ```
 
