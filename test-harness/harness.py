@@ -762,8 +762,8 @@ class TftpTestHarness:
         """Start the Apalache server using Docker."""
         self.log.info("Starting Apalache server via Docker...")
 
-        # Get the absolute path to the test-harness directory
-        harness_dir_abs = (self.spec_dir.parent / "test-harness").resolve()
+        # Get the absolute path to the repository root (parent of test-harness)
+        repo_root = self.spec_dir.parent.resolve()
 
         # Docker run command for Apalache server
         docker_cmd = [
@@ -771,7 +771,7 @@ class TftpTestHarness:
             "--rm",  # Remove container when stopped
             "-d",    # Run in detached mode
             "--name", "apalache-server",  # Named container for easy management
-            "-v", f"{harness_dir_abs}:/var/apalache",  # Mount test-harness directory
+            "-v", f"{repo_root}:/var/apalache",  # Mount repository root
             "-p", f"{port}:{port}",  # Expose port
             "ghcr.io/apalache-mc/apalache:latest",
             "server",
@@ -797,11 +797,33 @@ class TftpTestHarness:
                 'port': port
             }
 
-            # Wait a bit for the server to be ready
+            # Wait for the server to be ready
             self.log.info("Waiting for Apalache server to be ready...")
-            time.sleep(3)
+            max_wait = 30  # Maximum wait time in seconds
+            wait_interval = 2
+            elapsed = 0
 
-            self.log.info("Apalache server started successfully")
+            while elapsed < max_wait:
+                time.sleep(wait_interval)
+                elapsed += wait_interval
+
+                # Try to check if container is still running
+                try:
+                    check_result = subprocess.run(
+                        ["docker", "inspect", "-f", "{{.State.Running}}", "apalache-server"],
+                        capture_output=True,
+                        text=True,
+                        check=True
+                    )
+                    if check_result.stdout.strip() != "true":
+                        self.log.error("Apalache container stopped unexpectedly")
+                        return False
+                    self.log.info(f"Apalache server still starting... ({elapsed}s)")
+                except subprocess.CalledProcessError:
+                    self.log.error("Failed to check Apalache container status")
+                    return False
+
+            self.log.info("Apalache server should be ready now")
             return True
 
         except subprocess.CalledProcessError as e:
