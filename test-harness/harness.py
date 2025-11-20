@@ -3,7 +3,7 @@
 TFTP Test Harness - Main orchestrator for symbolic testing of TFTP protocol.
 
 This script:
-1. Starts the Apalache server
+1. Starts the Apalache server in Docker
 2. Loads the TFTP specification
 3. Generates test runs by exploring symbolic executions
 4. Controls Docker containers running the TFTP server and clients
@@ -184,6 +184,483 @@ class TftpTestHarness:
         self.sut_command_log = []
         # The list of feedback replies from SUT to process
         self.sut_feedback_to_process = set()
+
+    def run(self, num_tests: int = 1, max_steps: int = 20, use_docker: bool = False):
+        """
+        Main entry point for the test harness.
+
+        Args:
+            num_tests: Number of test runs to generate
+            max_steps: Maximum steps per test run
+            use_docker: Whether to use Docker for actual TFTP operations
+        """
+        try:
+            # Start Apalache server
+            if not self.start_apalache():
+                self.log.error("Failed to start Apalache")
+                return False
+
+            # Load specification
+            if not self.load_specification():
+                self.log.error("Failed to load specification")
+                return False
+
+            # Optionally set up Docker
+            if use_docker:
+                if not self.setup_docker():
+                    self.log.error("Failed to set up Docker")
+                    return False
+
+            # Generate test runs
+            for i in range(num_tests):
+                self.log.info(f"\n{'='*60}")
+                self.log.info(f"Generating test run {i + 1}/{num_tests}")
+                self.log.info(f"{'='*60}")
+
+                # Set up per-run logging BEFORE any test run operations
+                # Increment run number and create directory
+                self.test_run_number += 1
+                run_dir = self.get_run_dir()
+                run_dir.mkdir(parents=True, exist_ok=True)
+
+                # Add a file handler for this specific test run
+                run_log_file = run_dir / "python_harness.log"
+                run_handler = logging.FileHandler(run_log_file)
+                run_handler.setLevel(logging.INFO)
+                run_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+                # Get the root logger and add the handler
+                root_logger = logging.getLogger()
+                root_logger.addHandler(run_handler)
+                self.run_log_handlers.append(run_handler)
+
+                self.log.info(f"=== Starting test run generation {self.test_run_number} (max {max_steps} steps) ===")
+
+                # Rollback to initial state for each new test
+                if self.client and self.spec_params:
+                    self.client.rollback(self.spec_params['snapshot_id'])
+                    self.current_snapshot = self.spec_params['snapshot_id']
+
+                # Reset Docker containers to fresh state (similar to Apalache rollback)
+                if use_docker and self.docker:
+                    if not self.docker.reset_containers():
+                        self.log.error("Failed to reset Docker containers")
+                        return False
+
+                self.generate_test_run(max_steps=max_steps)
+
+            self.log.info(f"\n{'='*60}")
+            self.log.info(f"Test generation complete. Generated {self.test_run_number} test runs")
+            self.log.info(f"Results saved to {self.output_dir}")
+            self.log.info(f"{'='*60}")
+
+            return True
+
+        except Exception as e:
+            self.log.error(f"Error during test generation: {e}", exc_info=True)
+            return False
+
+        finally:
+            # Cleanup
+            if use_docker:
+                self.cleanup_docker()
+
+            if self.client:
+                self.client.dispose_spec()
+                self.client.close()
+
+            self.stop_apalache()
+
+    def generate_test_run(self, max_steps: int = 20) -> bool:
+        """
+        Generate a single test run by exploring symbolic execution.
+
+        Args:
+            max_steps: Maximum number of steps in the test run
+
+        Returns:
+            True if test run was successfully generated
+        """
+        if not self.client or not self.spec_params:
+            raise RuntimeError("Client or spec_params not initialized")
+
+        # Note: Per-run logging is set up in run() before calling this method
+
+        # Initialize with a random init transition
+        self.sut_feedback_to_process = set()
+        init_transitions = self.spec_params['init']
+        if not init_transitions:
+            self.log.error("No init transitions available")
+            return False
+
+        init_trans = random.choice(init_transitions)
+        self.log.debug(f"Selected init transition: {init_trans}")
+
+        if not self.try_spec_transition(init_trans):
+            self.log.error("Init transition is not enabled")
+            return False
+
+        self.transition_log.append(init_trans)
+
+        # Move to next step
+        self.current_snapshot = self.client.next_step()
+
+        # Main exploration loop
+        next_transitions = self.spec_params['next']
+
+        turn = TESTER               # Track whose turn it is: tester or SUT.
+        stop_test = False           # Something went wrong, stop the test?
+        for step in range(max_steps):
+            if stop_test:
+                break
+
+            self.log.info(f"\n--- Step {step + 1}/{max_steps} ---")
+            enabled_found = False
+
+            # Retrieve the new responses from the docker clients
+            if self.docker:
+                for src_ip in DockerManager.CLIENT_IPS:
+                    cmd = { 'type': 'get_packets' }
+                    response = self.docker.send_command_to_client(src_ip, cmd)
+                    if response:
+                        for sut_packet in response.get('packets', []):
+                            # convert to spec packet format
+                            spec_packet = self._spec_packet_from_sut_response(sut_packet)
+                            self.log.info(f"  SUT PACKET: {spec_packet}")
+                            self.sut_feedback_to_process.add(spec_packet)
+
+            if self.sut_feedback_to_process:
+                # give priority to SUT feedback
+                # TODO: choose randomly!
+                last_sut_feedback = self.sut_feedback_to_process.pop()
+                turn = SUT
+                op_labels = self._spec_labels_from_operation(last_sut_feedback) \
+                    if last_sut_feedback else []
+                transitions_to_try = [ trans for trans in next_transitions \
+                    if any(label in op_labels for label in trans.get("labels", []))
+                ]
+            else:
+                turn = TESTER
+                transitions_to_try = [ trans for trans in next_transitions \
+                    if frozenset(trans.get("labels")).intersection(TESTER_ACTION_LABELS)
+                ]
+
+            self.log.info(f"Turn: {turn}. {len(transitions_to_try)} transitions to try")
+
+            while len(transitions_to_try) > 0 and not enabled_found and not stop_test:
+                # Select a random next transition from the transitions we have not tried yet
+                next_trans = random.choice(transitions_to_try)
+                transitions_to_try.remove(next_trans)
+
+                # Save current snapshot before trying
+                snapshot_before = self.current_snapshot
+
+                # Try the transition in Apalache
+                if not self.try_spec_transition(next_trans):
+                    # Transition was disabled, rollback and try another
+                    if snapshot_before is not None:
+                        self.log.info(f"Rollback to snapshot {snapshot_before}")
+                        self.client.rollback(snapshot_before)
+                        self.current_snapshot = snapshot_before
+                else:
+                    # Move to next step in Apalache
+                    self.current_snapshot = self.client.next_step()
+
+                    if turn == TESTER:
+                        enabled_found = True
+                        self.transition_log.append(next_trans)
+                        # Before executing the SUT operation, recover lastAction
+                        # and save it in the SMT context. This way, we do not diverge
+                        # in the SMT context after executing the SUT operation.
+                        # Otherwise, Z3 may return another model later.
+                        last_action = self.get_last_spec_action()
+                        if last_action:
+                            equalities = { "lastAction": value_to_json(last_action) }
+                            assume_result = self.client.assume_state(equalities, check_enabled=True)
+                            if not isinstance(assume_result, AssumptionEnabled):
+                                # This is a critical error - we just assumed lastAction from the model!
+                                self.log.error("Failed to assume lastAction before after querying it from the model")
+                                stop_test = True
+                                break
+                            # save the current snapshot to remember the decision!
+                            self.current_snapshot = assume_result.snapshot_id
+                            # Execute the corresponding TFTP operation
+                            self.execute_sut_operation(next_trans["index"], last_action)
+                    elif turn == SUT:
+                        assert last_sut_feedback is not None, \
+                            "last_sut_feedback should not be None on SUT turn"
+
+                        # Normal case: validate the received packet
+                        # Create the variant using module-level dataclass
+                        expected_last_action = ActionRecvSend(sent=last_sut_feedback)
+                        self.log.info(f"Assume lastAction: {expected_last_action}")
+                        # Assume that lastAction equals the reconstructed action
+                        equalities = {
+                            "lastAction": value_to_json(expected_last_action)
+                        }
+                        assume_result = self.client.assume_state(equalities, check_enabled=True)
+                        if isinstance(assume_result, AssumptionEnabled):
+                            self.log.info(f"  EXECUTE ACTION: {expected_last_action}")
+                            self.log.info("✓ Received packet matches the spec")
+                            turn = TESTER
+                            last_sut_feedback = None
+                            enabled_found = True
+                            self.transition_log.append(next_trans)
+                            # save the current snapshot to remember the decision!
+                            self.current_snapshot = assume_result.snapshot_id
+                        elif isinstance(assume_result, AssumptionDisabled):
+                            # Test found a discrepancy - this is valuable!
+                            # However, we may have several SUT actions to try.
+                            # Hence, do not break the loop yet.
+                            # If we do not find a corresponding transition,
+                            # we will break out by enabled_found = False.
+                            enabled_found = False
+                            # Transition was disabled, rollback and try another
+                            if snapshot_before is not None:
+                                self.log.info(f"Rollback to snapshot {snapshot_before}")
+                                self.client.rollback(snapshot_before)
+                                self.current_snapshot = snapshot_before
+                        else:
+                            self.log.warning("? Unable to validate received packet")
+                            stop_test = True
+
+            if not enabled_found and not stop_test:
+                if turn != SUT:
+                    self.log.warning(f"✗ Could not find enabled transition for tester - ending test run")
+                    stop_test = True
+                else:
+                    self.log.warning("✗ Last SUT operation does NOT match the spec - test diverged!")
+
+                    # Save the current trace for debugging
+                    try:
+                        trace_data = self.get_current_trace()
+                        if trace_data:
+                            trace_json, _ = trace_data
+
+                            # Save trace to file in the current run directory
+                            run_dir = self.get_run_dir()
+                            trace_file = run_dir / "divergence_trace.itf.json"
+                            with open(trace_file, 'w') as f:
+                                json.dump(trace_json, f, indent=2)
+                            self.log.info(f"Saved divergence trace to {trace_file}")
+                    except Exception as e:
+                        self.log.error(f"Failed to save divergence trace: {e}", exc_info=True)
+
+                    stop_test = True
+
+        # Save the test run
+        self.save_test_run()
+
+        return True
+
+    def execute_sut_operation(self, transition_id: int, last_spec_action: Any) -> Optional[Dict[str, Any]]:
+        """
+        Execute the TFTP operation corresponding to the transition in SUT.
+
+        Args:
+            transition_id: The transition that is enabled in the spec
+            last_spec_action: The last action from the spec trace
+
+        Returns:
+            Dictionary containing the operation details and response
+        """
+
+        try:
+            # With itf-py 0.4.1+, variants are decoded as typed namedtuples
+            # The type name is the tag (e.g., 'ActionInit', 'ActionClientSendRRQ')
+            action_tag = type(last_spec_action).__name__
+
+            # Unified logging for all executed actions
+            self.log.info(f"  EXECUTE ACTION: {last_spec_action}")
+
+            # Determine the TFTP operation based on the action tag
+            operation = {
+                'transition_id': transition_id,
+                'timestamp': time.time(),
+                'action_tag': action_tag,
+                'action_value': last_spec_action,
+            }
+
+            # Parse the action to determine what TFTP command to send
+            if action_tag == 'ActionInit':
+                self.log.info("TFTP operation for ActionInit")
+                operation['command'] = 'init'
+            elif action_tag == 'ActionClientSendRRQ':
+                self.log.info("TFTP operation for ActionClientSendRRQ")
+                sent_packet = last_spec_action.sent
+                operation['command'] = 'send_rrq'
+
+                # Send RRQ command to Docker client
+                if self.docker:
+                    # Extract packet details (itf-py decoded namedtuples)
+                    src_ip = sent_packet.srcIp
+                    src_port = sent_packet.srcPort
+                    dest_port = sent_packet.destPort
+                    payload = sent_packet.payload
+
+                    # Extract RRQ details from payload
+                    # payload is a namedtuple for RRQ variant
+                    payload_data = payload.value if hasattr(payload, 'value') else payload
+                    filename = payload_data.filename
+                    mode = payload_data.mode
+                    options = payload_data.options if hasattr(payload_data, 'options') else {}
+
+                    # Build command for Docker client
+                    # Note: client expects 'type': 'rrq', not 'action': 'send_rrq'
+                    command = {
+                        'type': 'rrq',
+                        'filename': filename,
+                        'mode': mode,
+                        'options': dict(options) if hasattr(options, 'items') else {},
+                        'source_port': src_port  # Optional: client can use specific source port
+                    }
+
+                    response = self.docker.send_command_to_client(src_ip, command)
+                    if response:
+                        if 'error' in response:
+                            # Docker client error (not a TFTP ERROR packet)
+                            self.log.error(f"Docker client error: {response['error']}")
+                    else:
+                        self.log.warning("No response from Docker client")
+                else:
+                    self.log.warning("Docker manager not initialized, skipping actual TFTP operation")
+            elif action_tag == 'ActionRecvSend':
+                sent_packet = last_spec_action.sent
+                self.log.info("TFTP operation for ActionRecvSend")
+                self.log.info(f"  Sent packet: {sent_packet}")
+                operation['command'] = 'recv_send'
+                operation['sent_packet'] = sent_packet
+
+                # Determine the specific recv/send operation based on packet types
+                sent_payload_type = type(sent_packet.payload).__name__ \
+                    if hasattr(sent_packet, 'payload') and sent_packet.payload else None
+
+                # Handle OACK received → ACK sent (client acknowledges option negotiation)
+                if sent_payload_type == 'ACK':
+                    self.log.info("  → Client sends ACK to server")
+
+                    if self.docker:
+                        # Extract packet details
+                        src_ip = sent_packet.srcIp
+                        src_port = sent_packet.srcPort
+                        dest_port = sent_packet.destPort
+                        ack_payload = sent_packet.payload
+
+                        # Extract ACK block number
+                        block_num = ack_payload.blockNum
+
+                        # Build ACK command for Docker client
+                        command = {
+                            'type': 'ack',
+                            'block_num': block_num,
+                            'dest_port': dest_port,
+                            'source_port': src_port
+                        }
+
+                        self.log.info(f"  Sending ACK command to client: {command}")
+                        response = self.docker.send_command_to_client(src_ip, command)
+
+                        if response:
+                            if 'error' in response:
+                                self.log.error(f"  ✗ Error from Docker client: {response['error']}")
+                        else:
+                            self.log.warning("  No response from Docker client")
+                    else:
+                        self.log.warning("  Docker manager not initialized, skipping actual operation")
+                # Handle ERROR sent (client rejects option negotiation or sends another error)
+                elif sent_payload_type == 'ERROR':
+                    self.log.info("  → Client sends ERROR to server")
+
+                    if self.docker:
+                        # Extract packet details
+                        src_ip = sent_packet.srcIp
+                        src_port = sent_packet.srcPort
+                        dest_port = sent_packet.destPort
+                        error_payload = sent_packet.payload
+
+                        # Extract ERROR details
+                        error_code = error_payload.errorCode
+                        error_msg = ERROR_MESSAGES.get(error_code, f"Error code {error_code}")
+
+                        # Build ERROR command for Docker client
+                        command = {
+                            'type': 'error',
+                            'error_code': error_code,
+                            'error_msg': error_msg,
+                            'dest_port': dest_port,
+                            'source_port': src_port
+                        }
+
+                        self.log.info(f"  Sending ERROR command to client: {command}")
+                        response = self.docker.send_command_to_client(src_ip, command)
+
+                        if response:
+                            if 'error' in response:
+                                self.log.error(f"  ✗ Error from Docker client: {response['error']}")
+                        else:
+                            self.log.warning("  No response from Docker client")
+                    else:
+                        self.log.warning("  Docker manager not initialized, skipping actual operation")
+                # Handle RRQ sent (client sends or retransmits read request)
+                elif sent_payload_type == 'RRQ':
+                    self.log.info("  → Client sends RRQ to server")
+
+                    if self.docker:
+                        # Extract packet details
+                        src_ip = sent_packet.srcIp
+                        src_port = sent_packet.srcPort
+                        rrq_payload = sent_packet.payload
+
+                        # Extract RRQ details
+                        filename = rrq_payload.filename
+                        mode = rrq_payload.mode
+                        options = rrq_payload.options
+
+                        # Build RRQ command for Docker client
+                        command = {
+                            'type': 'rrq',
+                            'filename': filename,
+                            'mode': mode,
+                            'options': dict(options) if hasattr(options, 'items') else {},
+                            'source_port': src_port
+                        }
+
+                        self.log.info(f"  Sending RRQ command to client: {command}")
+                        response = self.docker.send_command_to_client(src_ip, command)
+
+                        if response:
+                            if 'error' in response:
+                                self.log.error(f"  ✗ Error from Docker client: {response['error']}")
+                        else:
+                            self.log.warning("  No response from Docker client")
+                    else:
+                        self.log.warning("  Docker manager not initialized, skipping actual operation")
+                else:
+                    # TODO: Handle other combinations (DATA→ACK, etc.)
+                    self.log.warning(f"  Unhandled send: ... → {sent_payload_type}")
+            elif action_tag in ['ActionRecvClose']:
+                # This action is handled by the spec and SUT separately
+                self.log.info(f"No TFTP operation for {action_tag}")
+                pass
+            elif action_tag == 'ActionAdvanceClock':
+                delta = last_spec_action.delta
+                self.log.info(f"Action: Advance Clock by {delta}")
+                operation['command'] = 'advance_clock'
+                operation['delta'] = delta
+
+                # Sleep for the specified duration to simulate time passing.
+                # TODO: It would be nicer to have clock manipulation in the SUT directly.
+                time.sleep(delta)
+                self.log.info(f"  ✓ Clock advanced by {delta} seconds")
+            else:
+                self.log.warning(f"Unknown action tag: {action_tag}")
+                operation['command'] = 'unknown'
+
+            return operation
+
+        except Exception as e:
+            self.log.error(f"Error querying transition details: {e}", exc_info=True)
+            return None
 
     def setup_logging(self):
         """Configure logging for the harness."""
@@ -566,215 +1043,6 @@ class TftpTestHarness:
         else:
             return False
 
-    def execute_sut_operation(self, transition_id: int, last_spec_action: Any) -> Optional[Dict[str, Any]]:
-        """
-        Execute the TFTP operation corresponding to the transition in SUT.
-
-        Args:
-            transition_id: The transition that is enabled in the spec
-            last_spec_action: The last action from the spec trace
-
-        Returns:
-            Dictionary containing the operation details and response
-        """
-
-        try:
-            # With itf-py 0.4.1+, variants are decoded as typed namedtuples
-            # The type name is the tag (e.g., 'ActionInit', 'ActionClientSendRRQ')
-            action_tag = type(last_spec_action).__name__
-
-            # Unified logging for all executed actions
-            self.log.info(f"  EXECUTE ACTION: {last_spec_action}")
-
-            # Determine the TFTP operation based on the action tag
-            operation = {
-                'transition_id': transition_id,
-                'timestamp': time.time(),
-                'action_tag': action_tag,
-                'action_value': last_spec_action,
-            }
-
-            # Parse the action to determine what TFTP command to send
-            if action_tag == 'ActionInit':
-                self.log.info("TFTP operation for ActionInit")
-                operation['command'] = 'init'
-            elif action_tag == 'ActionClientSendRRQ':
-                self.log.info("TFTP operation for ActionClientSendRRQ")
-                sent_packet = last_spec_action.sent
-                operation['command'] = 'send_rrq'
-
-                # Send RRQ command to Docker client
-                if self.docker:
-                    # Extract packet details (itf-py decoded namedtuples)
-                    src_ip = sent_packet.srcIp
-                    src_port = sent_packet.srcPort
-                    dest_port = sent_packet.destPort
-                    payload = sent_packet.payload
-
-                    # Extract RRQ details from payload
-                    # payload is a namedtuple for RRQ variant
-                    payload_data = payload.value if hasattr(payload, 'value') else payload
-                    filename = payload_data.filename
-                    mode = payload_data.mode
-                    options = payload_data.options if hasattr(payload_data, 'options') else {}
-
-                    # Build command for Docker client
-                    # Note: client expects 'type': 'rrq', not 'action': 'send_rrq'
-                    command = {
-                        'type': 'rrq',
-                        'filename': filename,
-                        'mode': mode,
-                        'options': dict(options) if hasattr(options, 'items') else {},
-                        'source_port': src_port  # Optional: client can use specific source port
-                    }
-
-                    response = self.docker.send_command_to_client(src_ip, command)
-                    if response:
-                        if 'error' in response:
-                            # Docker client error (not a TFTP ERROR packet)
-                            self.log.error(f"Docker client error: {response['error']}")
-                    else:
-                        self.log.warning("No response from Docker client")
-                else:
-                    self.log.warning("Docker manager not initialized, skipping actual TFTP operation")
-            elif action_tag == 'ActionRecvSend':
-                sent_packet = last_spec_action.sent
-                self.log.info("TFTP operation for ActionRecvSend")
-                self.log.info(f"  Sent packet: {sent_packet}")
-                operation['command'] = 'recv_send'
-                operation['sent_packet'] = sent_packet
-
-                # Determine the specific recv/send operation based on packet types
-                sent_payload_type = type(sent_packet.payload).__name__ \
-                    if hasattr(sent_packet, 'payload') and sent_packet.payload else None
-
-                # Handle OACK received → ACK sent (client acknowledges option negotiation)
-                if sent_payload_type == 'ACK':
-                    self.log.info("  → Client sends ACK to server")
-
-                    if self.docker:
-                        # Extract packet details
-                        src_ip = sent_packet.srcIp
-                        src_port = sent_packet.srcPort
-                        dest_port = sent_packet.destPort
-                        ack_payload = sent_packet.payload
-
-                        # Extract ACK block number
-                        block_num = ack_payload.blockNum
-
-                        # Build ACK command for Docker client
-                        command = {
-                            'type': 'ack',
-                            'block_num': block_num,
-                            'dest_port': dest_port,
-                            'source_port': src_port
-                        }
-
-                        self.log.info(f"  Sending ACK command to client: {command}")
-                        response = self.docker.send_command_to_client(src_ip, command)
-
-                        if response:
-                            if 'error' in response:
-                                self.log.error(f"  ✗ Error from Docker client: {response['error']}")
-                        else:
-                            self.log.warning("  No response from Docker client")
-                    else:
-                        self.log.warning("  Docker manager not initialized, skipping actual operation")
-                # Handle ERROR sent (client rejects option negotiation or sends another error)
-                elif sent_payload_type == 'ERROR':
-                    self.log.info("  → Client sends ERROR to server")
-
-                    if self.docker:
-                        # Extract packet details
-                        src_ip = sent_packet.srcIp
-                        src_port = sent_packet.srcPort
-                        dest_port = sent_packet.destPort
-                        error_payload = sent_packet.payload
-
-                        # Extract ERROR details
-                        error_code = error_payload.errorCode
-                        error_msg = ERROR_MESSAGES.get(error_code, f"Error code {error_code}")
-
-                        # Build ERROR command for Docker client
-                        command = {
-                            'type': 'error',
-                            'error_code': error_code,
-                            'error_msg': error_msg,
-                            'dest_port': dest_port,
-                            'source_port': src_port
-                        }
-
-                        self.log.info(f"  Sending ERROR command to client: {command}")
-                        response = self.docker.send_command_to_client(src_ip, command)
-
-                        if response:
-                            if 'error' in response:
-                                self.log.error(f"  ✗ Error from Docker client: {response['error']}")
-                        else:
-                            self.log.warning("  No response from Docker client")
-                    else:
-                        self.log.warning("  Docker manager not initialized, skipping actual operation")
-                # Handle RRQ sent (client sends or retransmits read request)
-                elif sent_payload_type == 'RRQ':
-                    self.log.info("  → Client sends RRQ to server")
-
-                    if self.docker:
-                        # Extract packet details
-                        src_ip = sent_packet.srcIp
-                        src_port = sent_packet.srcPort
-                        rrq_payload = sent_packet.payload
-
-                        # Extract RRQ details
-                        filename = rrq_payload.filename
-                        mode = rrq_payload.mode
-                        options = rrq_payload.options
-
-                        # Build RRQ command for Docker client
-                        command = {
-                            'type': 'rrq',
-                            'filename': filename,
-                            'mode': mode,
-                            'options': dict(options) if hasattr(options, 'items') else {},
-                            'source_port': src_port
-                        }
-
-                        self.log.info(f"  Sending RRQ command to client: {command}")
-                        response = self.docker.send_command_to_client(src_ip, command)
-
-                        if response:
-                            if 'error' in response:
-                                self.log.error(f"  ✗ Error from Docker client: {response['error']}")
-                        else:
-                            self.log.warning("  No response from Docker client")
-                    else:
-                        self.log.warning("  Docker manager not initialized, skipping actual operation")
-                else:
-                    # TODO: Handle other combinations (DATA→ACK, etc.)
-                    self.log.warning(f"  Unhandled send: ... → {sent_payload_type}")
-            elif action_tag in ['ActionRecvClose']:
-                # This action is handled by the spec and SUT separately
-                self.log.info(f"No TFTP operation for {action_tag}")
-                pass
-            elif action_tag == 'ActionAdvanceClock':
-                delta = last_spec_action.delta
-                self.log.info(f"Action: Advance Clock by {delta}")
-                operation['command'] = 'advance_clock'
-                operation['delta'] = delta
-
-                # Sleep for the specified duration to simulate time passing.
-                # TODO: It would be nicer to have clock manipulation in the SUT directly.
-                time.sleep(delta)
-                self.log.info(f"  ✓ Clock advanced by {delta} seconds")
-            else:
-                self.log.warning(f"Unknown action tag: {action_tag}")
-                operation['command'] = 'unknown'
-
-            return operation
-
-        except Exception as e:
-            self.log.error(f"Error querying transition details: {e}", exc_info=True)
-            return None
-
     def save_test_run(self):
         """Save the current test run to disk."""
         # Note: test_run_number is already incremented and run_dir created in generate_test_run()
@@ -885,274 +1153,6 @@ class TftpTestHarness:
         # Reset for next run
         self.transition_log = []
         self.sut_command_log = []
-
-    def generate_test_run(self, max_steps: int = 20) -> bool:
-        """
-        Generate a single test run by exploring symbolic execution.
-
-        Args:
-            max_steps: Maximum number of steps in the test run
-
-        Returns:
-            True if test run was successfully generated
-        """
-        if not self.client or not self.spec_params:
-            raise RuntimeError("Client or spec_params not initialized")
-
-        # Note: Per-run logging is set up in run() before calling this method
-
-        # Initialize with a random init transition
-        self.sut_feedback_to_process = set()
-        init_transitions = self.spec_params['init']
-        if not init_transitions:
-            self.log.error("No init transitions available")
-            return False
-
-        init_trans = random.choice(init_transitions)
-        self.log.debug(f"Selected init transition: {init_trans}")
-
-        if not self.try_spec_transition(init_trans):
-            self.log.error("Init transition is not enabled")
-            return False
-
-        self.transition_log.append(init_trans)
-
-        # Move to next step
-        self.current_snapshot = self.client.next_step()
-
-        # Main exploration loop
-        next_transitions = self.spec_params['next']
-
-        turn = TESTER               # Track whose turn it is: tester or SUT.
-        stop_test = False           # Something went wrong, stop the test?
-        for step in range(max_steps):
-            if stop_test:
-                break
-
-            self.log.info(f"\n--- Step {step + 1}/{max_steps} ---")
-            enabled_found = False
-
-            # Retrieve the new responses from the docker clients
-            if self.docker:
-                for src_ip in DockerManager.CLIENT_IPS:
-                    cmd = { 'type': 'get_packets' }
-                    response = self.docker.send_command_to_client(src_ip, cmd)
-                    if response:
-                        for sut_packet in response.get('packets', []):
-                            # convert to spec packet format
-                            spec_packet = self._spec_packet_from_sut_response(sut_packet)
-                            self.log.info(f"  SUT PACKET: {spec_packet}")
-                            self.sut_feedback_to_process.add(spec_packet)
-
-            if self.sut_feedback_to_process:
-                # give priority to SUT feedback
-                # TODO: choose randomly!
-                last_sut_feedback = self.sut_feedback_to_process.pop()
-                turn = SUT
-                op_labels = self._spec_labels_from_operation(last_sut_feedback) \
-                    if last_sut_feedback else []
-                transitions_to_try = [ trans for trans in next_transitions \
-                    if any(label in op_labels for label in trans.get("labels", []))
-                ]
-            else:
-                turn = TESTER
-                transitions_to_try = [ trans for trans in next_transitions \
-                    if frozenset(trans.get("labels")).intersection(TESTER_ACTION_LABELS)
-                ]
-
-            self.log.info(f"Turn: {turn}. {len(transitions_to_try)} transitions to try")
-
-            while len(transitions_to_try) > 0 and not enabled_found and not stop_test:
-                # Select a random next transition from the transitions we have not tried yet
-                next_trans = random.choice(transitions_to_try)
-                transitions_to_try.remove(next_trans)
-
-                # Save current snapshot before trying
-                snapshot_before = self.current_snapshot
-
-                # Try the transition in Apalache
-                if not self.try_spec_transition(next_trans):
-                    # Transition was disabled, rollback and try another
-                    if snapshot_before is not None:
-                        self.log.info(f"Rollback to snapshot {snapshot_before}")
-                        self.client.rollback(snapshot_before)
-                        self.current_snapshot = snapshot_before
-                else:
-                    # Move to next step in Apalache
-                    self.current_snapshot = self.client.next_step()
-
-                    if turn == TESTER:
-                        enabled_found = True
-                        self.transition_log.append(next_trans)
-                        # Before executing the SUT operation, recover lastAction
-                        # and save it in the SMT context. This way, we do not diverge
-                        # in the SMT context after executing the SUT operation.
-                        # Otherwise, Z3 may return another model later.
-                        last_action = self.get_last_spec_action()
-                        if last_action:
-                            equalities = { "lastAction": value_to_json(last_action) }
-                            assume_result = self.client.assume_state(equalities, check_enabled=True)
-                            if not isinstance(assume_result, AssumptionEnabled):
-                                # This is a critical error - we just assumed lastAction from the model!
-                                self.log.error("Failed to assume lastAction before after querying it from the model")
-                                stop_test = True
-                                break
-                            # save the current snapshot to remember the decision!
-                            self.current_snapshot = assume_result.snapshot_id
-                            # Execute the corresponding TFTP operation
-                            self.execute_sut_operation(next_trans["index"], last_action)
-                    elif turn == SUT:
-                        assert last_sut_feedback is not None, \
-                            "last_sut_feedback should not be None on SUT turn"
-
-                        # Normal case: validate the received packet
-                        # Create the variant using module-level dataclass
-                        expected_last_action = ActionRecvSend(sent=last_sut_feedback)
-                        self.log.info(f"Assume lastAction: {expected_last_action}")
-                        # Assume that lastAction equals the reconstructed action
-                        equalities = {
-                            "lastAction": value_to_json(expected_last_action)
-                        }
-                        assume_result = self.client.assume_state(equalities, check_enabled=True)
-                        if isinstance(assume_result, AssumptionEnabled):
-                            self.log.info(f"  EXECUTE ACTION: {expected_last_action}")
-                            self.log.info("✓ Received packet matches the spec")
-                            turn = TESTER
-                            last_sut_feedback = None
-                            enabled_found = True
-                            self.transition_log.append(next_trans)
-                            # save the current snapshot to remember the decision!
-                            self.current_snapshot = assume_result.snapshot_id
-                        elif isinstance(assume_result, AssumptionDisabled):
-                            # Test found a discrepancy - this is valuable!
-                            # However, we may have several SUT actions to try.
-                            # Hence, do not break the loop yet.
-                            # If we do not find a corresponding transition,
-                            # we will break out by enabled_found = False.
-                            enabled_found = False
-                            # Transition was disabled, rollback and try another
-                            if snapshot_before is not None:
-                                self.log.info(f"Rollback to snapshot {snapshot_before}")
-                                self.client.rollback(snapshot_before)
-                                self.current_snapshot = snapshot_before
-                        else:
-                            self.log.warning("? Unable to validate received packet")
-                            stop_test = True
-
-            if not enabled_found and not stop_test:
-                if turn != SUT:
-                    self.log.warning(f"✗ Could not find enabled transition for tester - ending test run")
-                    stop_test = True
-                else:
-                    self.log.warning("✗ Last SUT operation does NOT match the spec - test diverged!")
-
-                    # Save the current trace for debugging
-                    try:
-                        trace_data = self.get_current_trace()
-                        if trace_data:
-                            trace_json, _ = trace_data
-
-                            # Save trace to file in the current run directory
-                            run_dir = self.get_run_dir()
-                            trace_file = run_dir / "divergence_trace.itf.json"
-                            with open(trace_file, 'w') as f:
-                                json.dump(trace_json, f, indent=2)
-                            self.log.info(f"Saved divergence trace to {trace_file}")
-                    except Exception as e:
-                        self.log.error(f"Failed to save divergence trace: {e}", exc_info=True)
-
-                    stop_test = True
-
-        # Save the test run
-        self.save_test_run()
-
-        return True
-
-    def run(self, num_tests: int = 1, max_steps: int = 20, use_docker: bool = False):
-        """
-        Main entry point for the test harness.
-
-        Args:
-            num_tests: Number of test runs to generate
-            max_steps: Maximum steps per test run
-            use_docker: Whether to use Docker for actual TFTP operations
-        """
-        try:
-            # Start Apalache server
-            if not self.start_apalache():
-                self.log.error("Failed to start Apalache")
-                return False
-
-            # Load specification
-            if not self.load_specification():
-                self.log.error("Failed to load specification")
-                return False
-
-            # Optionally set up Docker
-            if use_docker:
-                if not self.setup_docker():
-                    self.log.error("Failed to set up Docker")
-                    return False
-
-            # Generate test runs
-            for i in range(num_tests):
-                self.log.info(f"\n{'='*60}")
-                self.log.info(f"Generating test run {i + 1}/{num_tests}")
-                self.log.info(f"{'='*60}")
-
-                # Set up per-run logging BEFORE any test run operations
-                # Increment run number and create directory
-                self.test_run_number += 1
-                run_dir = self.get_run_dir()
-                run_dir.mkdir(parents=True, exist_ok=True)
-
-                # Add a file handler for this specific test run
-                run_log_file = run_dir / "python_harness.log"
-                run_handler = logging.FileHandler(run_log_file)
-                run_handler.setLevel(logging.INFO)
-                run_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-
-                # Get the root logger and add the handler
-                root_logger = logging.getLogger()
-                root_logger.addHandler(run_handler)
-                self.run_log_handlers.append(run_handler)
-
-                self.log.info(f"=== Starting test run generation {self.test_run_number} (max {max_steps} steps) ===")
-
-                # Rollback to initial state for each new test
-                if self.client and self.spec_params:
-                    self.client.rollback(self.spec_params['snapshot_id'])
-                    self.current_snapshot = self.spec_params['snapshot_id']
-
-                # Reset Docker containers to fresh state (similar to Apalache rollback)
-                if use_docker and self.docker:
-                    if not self.docker.reset_containers():
-                        self.log.error("Failed to reset Docker containers")
-                        return False
-
-                self.generate_test_run(max_steps=max_steps)
-
-            self.log.info(f"\n{'='*60}")
-            self.log.info(f"Test generation complete. Generated {self.test_run_number} test runs")
-            self.log.info(f"Results saved to {self.output_dir}")
-            self.log.info(f"{'='*60}")
-
-            return True
-
-        except Exception as e:
-            self.log.error(f"Error during test generation: {e}", exc_info=True)
-            return False
-
-        finally:
-            # Cleanup
-            if use_docker:
-                self.cleanup_docker()
-
-            if self.client:
-                self.client.dispose_spec()
-                self.client.close()
-
-            self.stop_apalache()
 
 
 def main():
