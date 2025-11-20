@@ -209,11 +209,10 @@ Poetry project configuration:
    docker pull ghcr.io/apalache-mc/apalache
    ```
 
-   You can checker whether it is working properly by running:
+   You can check whether it is working properly by running:
    ```bash
    docker run --rm -v$(pwd)':/var/apalache' -p 8822:8822 \
-     ghcr.io/apalache-mc/apalache:latest server --server-type=explorer \
-     --hostname=0.0.0.0
+     ghcr.io/apalache-mc/apalache:latest server --server-type=explorer
    ```
 
 2. **Install Docker**: Required for running TFTP server and clients
