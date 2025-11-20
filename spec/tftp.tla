@@ -121,7 +121,7 @@ ClientSendRRQ(_srcIp, _srcPort, _filename, _options) ==
                 ]
             ELSE clientTransfers[p]
         ]
-    /\ packets' = packets \cup {udp}
+    /\ packets' = packets \union {udp}
     /\ lastAction' = ActionClientSendRRQ(udp)
     /\ UNCHANGED <<serverTransfers, clock>>
 
