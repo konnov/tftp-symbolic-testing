@@ -20,15 +20,10 @@ jobs:
     
     - name: Run Apalache typecheck
       run: |
-        mkdir -p ${{ github.workspace }}/tmp
         docker run --rm \
-          --user $(id -u):$(id -g) \
-          --entrypoint="" \
           -v ${{ github.workspace }}/spec:/var/apalache \
-          -v ${{ github.workspace }}/tmp:/tmp \
-          -e HOME=/tmp \
           ghcr.io/apalache-mc/apalache:latest \
-          /opt/apalache/bin/apalache-mc typecheck MC2_tftp.tla
+          typecheck MC2_tftp.tla
 
   check-spec:
     runs-on: ubuntu-latest
@@ -44,15 +39,10 @@ jobs:
     - name: Run Apalache check (expecting error)
       run: |
         set +e  # Don't exit on error
-        mkdir -p ${{ github.workspace }}/tmp
         docker run --rm \
-          --user $(id -u):$(id -g) \
-          --entrypoint="" \
           -v ${{ github.workspace }}/spec:/var/apalache \
-          -v ${{ github.workspace }}/tmp:/tmp \
-          -e HOME=/tmp \
           ghcr.io/apalache-mc/apalache:latest \
-          /opt/apalache/bin/apalache-mc check --inv=RecvOneDataBlockEx MC2_tftp.tla
+          check --inv=RecvOneDataBlockEx MC2_tftp.tla
         
         EXIT_CODE=$?
         
