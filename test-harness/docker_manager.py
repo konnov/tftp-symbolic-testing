@@ -291,6 +291,22 @@ class DockerManager:
             self.log.error(f"Unexpected error getting client logs: {e}")
             return f"Error retrieving client logs: {e}"
 
+    def get_pcap(self) -> Optional[bytes]:
+        """Get the pcap file from the TFTP server container."""
+        try:
+            result = subprocess.run(
+                ["docker", "exec", "tftp-server", "cat", "/var/log/tftp.pcap"],
+                capture_output=True,
+                check=True
+            )
+            return result.stdout
+        except subprocess.CalledProcessError as e:
+            self.log.error(f"Failed to get pcap file: {e.stderr}")
+            return None
+        except Exception as e:
+            self.log.error(f"Unexpected error getting pcap file: {e}")
+            return None
+
     def stop_server(self):
         """Stop the TFTP server container."""
         try:

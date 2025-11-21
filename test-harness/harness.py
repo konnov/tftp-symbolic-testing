@@ -516,6 +516,16 @@ class TftpTestHarness:
                 with open(client_logs_file, 'w') as f:
                     f.write(client_logs)
                 self.log.info(f"TFTP client logs for {client_ip} saved to {client_logs_file}")
+            
+            # Save pcap file for packet inspection
+            pcap_file = run_dir / "tftp_capture.pcap"
+            pcap_data = self.docker.get_pcap()
+            if pcap_data:
+                with open(pcap_file, 'wb') as f:
+                    f.write(pcap_data)
+                self.log.info(f"TFTP packet capture saved to {pcap_file}")
+            else:
+                self.log.warning("Failed to retrieve pcap file")
         
         return True
 
@@ -1475,6 +1485,16 @@ class TftpTestHarness:
                 with open(client_logs_file, 'w') as f:
                     f.write(client_logs)
                 self.log.info(f"TFTP client logs for {client_ip} saved to {client_logs_file}")
+            
+            # Save pcap file for packet inspection
+            pcap_file = run_dir / "tftp_capture.pcap"
+            pcap_data = self.docker.get_pcap()
+            if pcap_data:
+                with open(pcap_file, 'wb') as f:
+                    f.write(pcap_data)
+                self.log.info(f"TFTP packet capture saved to {pcap_file}")
+            else:
+                self.log.warning("Failed to retrieve pcap file")
 
         self.log.info(f"=== Test run {self.test_run_number} completed and saved to {run_dir} ===")
 

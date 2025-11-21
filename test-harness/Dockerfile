@@ -59,9 +59,10 @@ run_tftpd_with_watchdog() {\n\
     # -n: Don't resolve addresses\n\
     # -s 0: Capture full packets\n\
     # -vv: Very verbose\n\
-    stdbuf -oL -eL tcpdump -l -U -i any -n -s 0 -vv udp 2>&1 &\n\
+    # -w: Write raw packets to pcap file for later analysis\n\
+    tcpdump -i any -n -s 0 -w /var/log/tftp.pcap udp 2>&1 | stdbuf -oL -eL tee /dev/stderr &\n\
     TCPDUMP_PID=$!\n\
-    echo "Started tcpdump with PID $TCPDUMP_PID (unbuffered output)"\n\
+    echo "Started tcpdump with PID $TCPDUMP_PID (saving to /var/log/tftp.pcap)"\n\
     \n\
     # Start TFTP server in foreground with verbose logging\n\
     # Using stdbuf to disable buffering so we see output immediately\n\
