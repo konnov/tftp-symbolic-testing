@@ -271,6 +271,230 @@ class TftpTestHarness:
 
             self.stop_apalache()
 
+    def replay_transitions(self, transitions_file: str, use_docker: bool = False) -> bool:
+        """
+        Replay transitions from a saved transitions.txt file.
+
+        Args:
+            transitions_file: Path to the transitions.txt file
+            use_docker: Whether to use Docker for actual TFTP operations
+
+        Returns:
+            True if replay succeeded, False otherwise
+        """
+        try:
+            # Read transitions from file
+            transitions_path = Path(transitions_file)
+            if not transitions_path.exists():
+                self.log.error(f"Transitions file not found: {transitions_file}")
+                return False
+
+            self.log.info(f"Reading transitions from {transitions_file}")
+            with open(transitions_path, 'r') as f:
+                content = f.read().strip()
+            
+            # Parse the transitions - they're stored as Python dict syntax with single quotes
+            # Format: {'index': 0, 'labels': ['Init']},{'index': 1, 'labels': ['Action1']},...
+            # We need to evaluate them as Python literals
+            import ast
+            transitions = []
+            for item_str in content.split('},{'):
+                item_str = item_str.strip()
+                if not item_str.startswith('{'):
+                    item_str = '{' + item_str
+                if not item_str.endswith('}'):
+                    item_str = item_str + '}'
+                # Use ast.literal_eval to safely parse Python dict syntax
+                transitions.append(ast.literal_eval(item_str))
+            
+            self.log.info(f"Loaded {len(transitions)} transitions to replay")
+
+            # Start Apalache server
+            if not self.start_apalache():
+                self.log.error("Failed to start Apalache")
+                return False
+
+            # Load specification
+            if not self.load_specification():
+                self.log.error("Failed to load specification")
+                return False
+
+            # Optionally set up Docker
+            if use_docker:
+                if not self.setup_docker():
+                    self.log.error("Failed to set up Docker")
+                    return False
+
+            # Set up per-run logging
+            self.test_run_number += 1
+            run_dir = self.get_run_dir()
+            run_dir.mkdir(parents=True, exist_ok=True)
+
+            run_log_file = run_dir / "python_harness.log"
+            run_handler = logging.FileHandler(run_log_file)
+            run_handler.setLevel(logging.INFO)
+            run_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+            root_logger = logging.getLogger()
+            root_logger.addHandler(run_handler)
+            self.run_log_handlers.append(run_handler)
+
+            self.log.info(f"=== Replaying {len(transitions)} transitions ===")
+
+            # Reset Docker containers to fresh state
+            if use_docker and self.docker:
+                if not self.docker.reset_containers():
+                    self.log.error("Failed to reset Docker containers")
+                    return False
+
+            # Execute transitions one by one
+            success = self._replay_transitions_sequence(transitions, run_dir, use_docker)
+
+            # Save results
+            if success:
+                self.log.info(f"=== Replay completed successfully ===")
+            else:
+                self.log.warning(f"=== Replay diverged or failed ===")
+
+            self.log.info(f"Results saved to {run_dir}")
+
+            return success
+
+        except Exception as e:
+            self.log.error(f"Error during replay: {e}", exc_info=True)
+            return False
+
+        finally:
+            # Cleanup
+            if use_docker:
+                self.cleanup_docker()
+
+            if self.client:
+                self.client.dispose_spec()
+                self.client.close()
+
+            self.stop_apalache()
+
+    def _replay_transitions_sequence(self, transitions: List[Dict], run_dir: Path, use_docker: bool) -> bool:
+        """
+        Execute a sequence of transitions and compare with SUT behavior.
+
+        Args:
+            transitions: List of transition dictionaries with 'index' and 'labels'
+            run_dir: Directory to save results
+            use_docker: Whether Docker is being used
+
+        Returns:
+            True if all transitions executed successfully, False otherwise
+        """
+        # Start from initial state
+        if not self.client or not self.spec_params:
+            self.log.error("Specification not loaded")
+            return False
+
+        self.client.rollback(self.spec_params['snapshot_id'])
+        self.current_snapshot = self.spec_params['snapshot_id']
+
+        # Get initial transitions
+        next_transitions = self.spec_params['next']
+        
+        step = 0
+        stop_test = False
+        
+        for trans_info in transitions:
+            if stop_test:
+                break
+                
+            trans_index = trans_info['index']
+            trans_labels = trans_info['labels']
+            
+            self.log.info(f"\n--- Replaying step {step + 1}: transition {trans_index} {trans_labels} ---")
+            
+            # Find the transition in next_transitions
+            if trans_index >= len(next_transitions):
+                self.log.error(f"Invalid transition index {trans_index}, only {len(next_transitions)} available")
+                return False
+            
+            transition = next_transitions[trans_index]
+            
+            # Verify labels match
+            if transition.get('labels') != trans_labels:
+                self.log.warning(f"Label mismatch: expected {trans_labels}, got {transition.get('labels')}")
+            
+            # Try to execute this transition using assume_transition
+            self.log.info(f"Trying transition {trans_index} {trans_labels}...")
+            result = self.client.assume_transition(trans_index, check_enabled=True)
+            
+            if isinstance(result, TransitionDisabled):
+                self.log.error(f"Transition {trans_index}: DISABLED (should be enabled for replay)")
+                return False
+            elif isinstance(result, TransitionEnabled):
+                self.log.info(f"Transition {trans_index}: ENABLED")
+                
+                # Move to the next state
+                self.current_snapshot = self.client.next_step()
+                
+                # Get the current action
+                action = self.get_last_spec_action()
+                if action:
+                    self.log.info(f"  EXECUTE ACTION: {action}")
+                    
+                    # Execute the action if using Docker
+                    if use_docker and self.docker:
+                        # Execute TFTP operation based on action
+                        self.execute_sut_operation(trans_index, action)
+                        
+                        # Check for SUT feedback
+                        for src_ip in DockerManager.CLIENT_IPS:
+                            cmd = {'type': 'get_packets'}
+                            response = self.docker.send_command_to_client(src_ip, cmd)
+                            if response:
+                                for sut_packet in response.get('packets', []):
+                                    spec_packet = self._spec_packet_from_sut_response(sut_packet)
+                                    self.log.info(f"  SUT PACKET: {spec_packet}")
+                
+                step += 1
+            else:
+                self.log.error(f"Unexpected result type: {type(result)}")
+                return False
+
+        self.log.info(f"Successfully replayed {step} transitions")
+        
+        # Save the final trace
+        trace_data = self.get_current_trace()
+        if trace_data:
+            trace_json, trace = trace_data
+            trace_file = run_dir / "trace.itf.json"
+            with open(trace_file, 'w') as f:
+                json.dump(trace_json, f, indent=2)
+            self.log.info(f"Trace saved to {trace_file}")
+        
+        # Save Docker logs if using Docker
+        if use_docker and self.docker:
+            # Save server logs
+            server_logs_file = run_dir / "tftpd_server.log"
+            server_logs = self.docker.get_server_logs()
+            with open(server_logs_file, 'w') as f:
+                f.write(server_logs)
+            self.log.info(f"TFTP server logs saved to {server_logs_file}")
+
+            # Save syslog
+            syslog_file = run_dir / "tftpd_syslog.log"
+            syslog_content = self.docker.get_syslog()
+            with open(syslog_file, 'w') as f:
+                f.write(syslog_content)
+            self.log.info(f"TFTP server syslog saved to {syslog_file}")
+
+            # Save client logs from all client containers
+            for client_ip in DockerManager.CLIENT_IPS:
+                client_logs_file = run_dir / f"tftp_client_{client_ip.split('.')[-1]}.log"
+                client_logs = self.docker.get_client_logs(client_ip)
+                with open(client_logs_file, 'w') as f:
+                    f.write(client_logs)
+                self.log.info(f"TFTP client logs for {client_ip} saved to {client_logs_file}")
+        
+        return True
+
     def generate_test_run(self, max_steps: int = 20) -> bool:
         """
         Generate a single test run by exploring symbolic execution.
@@ -1216,6 +1440,14 @@ class TftpTestHarness:
                 f.write(syslog_content)
             self.log.info(f"TFTP server syslog saved to {syslog_file}")
 
+            # Save client logs from all client containers
+            for client_ip in DockerManager.CLIENT_IPS:
+                client_logs_file = run_dir / f"tftp_client_{client_ip.split('.')[-1]}.log"
+                client_logs = self.docker.get_client_logs(client_ip)
+                with open(client_logs_file, 'w') as f:
+                    f.write(client_logs)
+                self.log.info(f"TFTP client logs for {client_ip} saved to {client_logs_file}")
+
         self.log.info(f"=== Test run {self.test_run_number} completed and saved to {run_dir} ===")
 
         # Remove the run-specific log handler and close it
@@ -1242,6 +1474,8 @@ def main():
                         help='Number of test runs to generate (default: 10)')
     parser.add_argument('--steps', type=int, default=100,
                         help='Maximum steps per test run (default: 100)')
+    parser.add_argument('--replay', type=str, metavar='TRANSITIONS_FILE',
+                        help='Replay transitions from a transitions.txt file')
     args = parser.parse_args()
 
     # Configuration
@@ -1257,8 +1491,15 @@ def main():
         log_dir=str(log_dir)
     )
 
-    # Generate test runs
-    success = harness.run(num_tests=args.tests, max_steps=args.steps, use_docker=args.docker)
+    # Replay mode or normal generation
+    if args.replay:
+        success = harness.replay_transitions(
+            transitions_file=args.replay,
+            use_docker=args.docker
+        )
+    else:
+        # Generate test runs
+        success = harness.run(num_tests=args.tests, max_steps=args.steps, use_docker=args.docker)
 
     sys.exit(0 if success else 1)
 

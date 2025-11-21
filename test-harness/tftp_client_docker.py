@@ -195,10 +195,14 @@ class TftpClient:
         Returns:
             Dictionary containing packet information
         """
+        # Log raw packet for debugging
+        self.log.info(f"Decoding packet: length={len(data)}, hex={data.hex()}")
+        
         if len(data) < 2:
             return {'opcode': 0, 'error': 'Packet too short'}
 
         opcode = struct.unpack("!H", data[:2])[0]
+        self.log.info(f"Decoded opcode: {opcode}")
 
         if opcode == OPCODE_DATA:
             if len(data) < 4:
@@ -305,7 +309,7 @@ class TftpClient:
         Returns:
             Send status information
         """
-        self.log.info(f"Sending ACK for block {block_num}")
+        self.log.info(f"Sending ACK for block {block_num} to {self.server_ip}:{dest_port}")
 
         try:
             # Initialize UDP socket for this port
@@ -315,6 +319,7 @@ class TftpClient:
             sock = self.udp_sockets[actual_port]
 
             ack_packet = self.encode_ack(block_num)
+            self.log.info(f"ACK packet: length={len(ack_packet)}, hex={ack_packet.hex()}")
             sock.sendto(ack_packet, (self.server_ip, dest_port))
             self.log.info(f"Sent ACK to {self.server_ip}:{dest_port} from port {actual_port}")
 
@@ -520,6 +525,7 @@ class TftpClient:
                             data, addr = sock.recvfrom(65536)
                             local_port = sock.getsockname()[1]
 
+                            self.log.info(f"Received UDP packet: {len(data)} bytes from {addr} to {self.client_ip}:{local_port}")
                             packet_info = self.decode_packet(data)
                             packet_info['src_ip'] = addr[0]
                             packet_info['src_port'] = addr[1]
@@ -529,7 +535,7 @@ class TftpClient:
                             # Add to buffer
                             self.packet_buffer.append(packet_info)
 
-                            self.log.info(f"Buffered packet: {packet_info.get('opcode_name', 'UNKNOWN')} from {addr} to port {local_port}")
+                            self.log.info(f"Buffered packet: {packet_info.get('opcode_name', 'UNKNOWN')} from {addr} to port {local_port}, full info: {packet_info}")
                         except Exception as e:
                             self.log.error(f"Error receiving UDP packet: {e}")
 
