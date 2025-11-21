@@ -1,0 +1,122 @@
+FROM ubuntu:22.04
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    dnsmasq \
+    python3 \
+    python3-pip \
+    iproute2 \
+    iputils-ping \
+    net-tools \
+    tcpdump \
+    coreutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create TFTP root directory
+RUN mkdir -p /var/tftp
+
+# Copy test files
+COPY files/ /var/tftp
+
+# Set permissions
+RUN chmod -R 755 /var/tftp && \
+    chown -R nobody:nogroup /var/tftp
+
+# Copy the TFTP client script
+COPY tftp_client_docker.py /usr/local/bin/tftp_client.py
+RUN chmod +x /usr/local/bin/tftp_client.py
+
+# Expose ports
+# Port 69 is the TFTP control port
+# Ports 1024-1027 are the data transfer ports (as per MC2_tftp.tla)
+# Port 15000 is the TCP control port for the client
+#EXPOSE 69 1024-1027 15000
+
+# Create startup script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+# Docker Compose already assigns the IP via ipv4_address, no manual configuration needed\n\
+\n\
+# Watchdog function to monitor TFTP server\n\
+run_dnsmasq_with_watchdog() {\n\
+  local restart_count=0\n\
+  local max_restarts=1\n\
+  \n\
+  while [ $restart_count -lt $max_restarts ]; do\n\
+    echo "Starting dnsmasq TFTP server (attempt $((restart_count + 1))/$max_restarts)"\n\
+    echo "Command: dnsmasq --no-daemon --log-queries --log-dhcp --log-facility=- --enable-tftp --tftp-root=/var/tftp --tftp-secure --tftp-port-range=${PORT_RANGE} --listen-address=${SERVER_IP} --bind-interfaces --port=0"\n\
+    \n\
+    # Start tcpdump in background to capture TFTP traffic\n\
+    # -l: Line buffered output (immediate output per line)\n\
+    # -U: Packet buffered output (don't wait for buffer to fill)\n\
+    # -i any: Capture on all interfaces\n\
+    # -n: Don't resolve addresses\n\
+    # -s 0: Capture full packets\n\
+    # -vv: Very verbose\n\
+    stdbuf -oL -eL tcpdump -l -U -i any -n -s 0 -vv udp 2>&1 &\n\
+    TCPDUMP_PID=$!\n\
+    echo "Started tcpdump with PID $TCPDUMP_PID (unbuffered output)"\n\
+    \n\
+    # Start dnsmasq TFTP server in foreground with verbose logging\n\
+    # --no-daemon: Run in foreground\n\
+    # --log-queries: Log all queries\n\
+    # --log-dhcp: Log DHCP (not used but helps with verbose logging)\n\
+    # --log-facility=-: Log to stdout\n\
+    # --enable-tftp: Enable TFTP server\n\
+    # --tftp-root: TFTP root directory\n\
+    # --tftp-secure: Enable secure mode (chroot to tftp-root)\n\
+    # --tftp-port-range: Port range for TFTP transfers\n\
+    # --listen-address: IP address to listen on\n\
+    # --bind-interfaces: Bind only to specified interfaces\n\
+    # --port=0: Disable DNS server (we only want TFTP)\n\
+    exec 2>&1\n\
+    stdbuf -oL -eL dnsmasq --no-daemon --log-queries --log-dhcp \\\n\
+      --log-facility=- --enable-tftp --tftp-root=/var/tftp \\\n\
+      --tftp-secure --tftp-port-range=${PORT_RANGE} \\\n\
+      --listen-address=${SERVER_IP} --bind-interfaces --port=0\n\
+    \n\
+    exit_code=$?\n\
+    timestamp=$(date "+%Y-%m-%d %H:%M:%S")\n\
+    \n\
+    if [ $exit_code -eq 0 ]; then\n\
+      echo "[$timestamp] dnsmasq TFTP server exited normally with code 0"\n\
+      break\n\
+    else\n\
+      echo "[$timestamp] !!! DNSMASQ TFTP SERVER CRASHED !!!"\n\
+      echo "[$timestamp] Exit code: $exit_code"\n\
+      echo "[$timestamp] Signal: $((exit_code - 128))"\n\
+      restart_count=$((restart_count + 1))\n\
+      \n\
+      if [ $restart_count -lt $max_restarts ]; then\n\
+        echo "[$timestamp] Restarting dnsmasq TFTP server in 2 seconds..."\n\
+        sleep 2\n\
+      else\n\
+        echo "[$timestamp] Maximum restart attempts reached. Giving up."\n\
+        return $exit_code\n\
+      fi\n\
+    fi\n\
+  done\n\
+}\n\
+\n\
+# Start dnsmasq TFTP server with watchdog in background\n\
+run_dnsmasq_with_watchdog &\n\
+TFTPD_PID=$!\n\
+echo "dnsmasq TFTP server watchdog started with PID $TFTPD_PID"\n\
+\n\
+# Start client control server if CLIENT_IP is set\n\
+if [ -n "${CLIENT_IP}" ]; then\n\
+  echo "Starting TFTP client control server on ${CLIENT_IP}:${CONTROL_PORT:-15000}"\n\
+  python3 /usr/local/bin/tftp_client.py \\\n\
+    --client-ip ${CLIENT_IP} \\\n\
+    --server-ip ${SERVER_IP} \\\n\
+    --control-port ${CONTROL_PORT:-15000} &\n\
+  CLIENT_PID=$!\n\
+  echo "Client started with PID $CLIENT_PID"\n\
+fi\n\
+\n\
+# Wait for processes\n\
+wait\n\
+' > /usr/local/bin/start.sh && chmod +x /usr/local/bin/start.sh
+
+CMD ["/usr/local/bin/start.sh"]

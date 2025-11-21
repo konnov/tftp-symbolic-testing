@@ -185,7 +185,7 @@ class TftpTestHarness:
         # The list of feedback replies from SUT to process
         self.sut_feedback_to_process = set()
 
-    def run(self, num_tests: int = 1, max_steps: int = 20, use_docker: bool = False):
+    def run(self, num_tests: int = 1, max_steps: int = 20, use_docker: bool = False, server_type: str = "tftp-hpa"):
         """
         Main entry point for the test harness.
 
@@ -193,6 +193,7 @@ class TftpTestHarness:
             num_tests: Number of test runs to generate
             max_steps: Maximum steps per test run
             use_docker: Whether to use Docker for actual TFTP operations
+            server_type: TFTP server implementation to test ("tftp-hpa" or "dnsmasq")
         """
         try:
             # Start Apalache server
@@ -207,7 +208,7 @@ class TftpTestHarness:
 
             # Optionally set up Docker
             if use_docker:
-                if not self.setup_docker():
+                if not self.setup_docker(server_type):
                     self.log.error("Failed to set up Docker")
                     return False
 
@@ -271,13 +272,14 @@ class TftpTestHarness:
 
             self.stop_apalache()
 
-    def replay_transitions(self, transitions_file: str, use_docker: bool = False) -> bool:
+    def replay_transitions(self, transitions_file: str, use_docker: bool = False, server_type: str = "tftp-hpa") -> bool:
         """
         Replay transitions from a saved transitions.txt file.
 
         Args:
             transitions_file: Path to the transitions.txt file
             use_docker: Whether to use Docker for actual TFTP operations
+            server_type: TFTP server implementation to test ("tftp-hpa" or "dnsmasq")
 
         Returns:
             True if replay succeeded, False otherwise
@@ -321,7 +323,7 @@ class TftpTestHarness:
 
             # Optionally set up Docker
             if use_docker:
-                if not self.setup_docker():
+                if not self.setup_docker(server_type):
                     self.log.error("Failed to set up Docker")
                     return False
 
@@ -1159,12 +1161,16 @@ class TftpTestHarness:
                 except Exception as e:
                     self.log.error(f"Error stopping Apalache server: {e}")
 
-    def setup_docker(self) -> bool:
-        """Set up the Docker environment for TFTP testing."""
-        self.log.info("Setting up Docker environment...")
+    def setup_docker(self, server_type: str = "tftp-hpa") -> bool:
+        """Set up the Docker environment for TFTP testing.
+        
+        Args:
+            server_type: TFTP server implementation to test ("tftp-hpa" or "dnsmasq")
+        """
+        self.log.info(f"Setting up Docker environment with {server_type} server...")
 
         # Initialize Docker manager
-        self.docker = DockerManager(str(self.spec_dir.parent / "test-harness"))
+        self.docker = DockerManager(str(self.spec_dir.parent / "test-harness"), server_type)
 
         # Ensure docker_manager logs propagate to root logger and thus to our file handlers
         docker_logger = logging.getLogger('docker_manager')
@@ -1492,6 +1498,9 @@ def main():
     parser = argparse.ArgumentParser(description='TFTP Test Harness - Symbolic Testing')
     parser.add_argument('--docker', action='store_true',
                         help='Enable Docker for actual TFTP operations')
+    parser.add_argument('--server', type=str, default='tftp-hpa',
+                        choices=['tftp-hpa', 'dnsmasq'],
+                        help='TFTP server implementation to test (default: tftp-hpa)')
     parser.add_argument('--tests', type=int, default=10,
                         help='Number of test runs to generate (default: 10)')
     parser.add_argument('--steps', type=int, default=100,
@@ -1517,11 +1526,17 @@ def main():
     if args.replay:
         success = harness.replay_transitions(
             transitions_file=args.replay,
-            use_docker=args.docker
+            use_docker=args.docker,
+            server_type=args.server
         )
     else:
         # Generate test runs
-        success = harness.run(num_tests=args.tests, max_steps=args.steps, use_docker=args.docker)
+        success = harness.run(
+            num_tests=args.tests,
+            max_steps=args.steps,
+            use_docker=args.docker,
+            server_type=args.server
+        )
 
     sys.exit(0 if success else 1)
 

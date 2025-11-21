@@ -26,33 +26,43 @@ class DockerManager:
     PORT_RANGE = "1024:1027"
     CONTROL_PORT = 15000  # Changed from 5000 to avoid conflict with macOS ControlCenter
 
-    def __init__(self, test_harness_dir: str):
+    def __init__(self, test_harness_dir: str, server_type: str = "tftp-hpa"):
         """
         Initialize the Docker manager.
 
         Args:
             test_harness_dir: Directory containing test harness files
+            server_type: Type of TFTP server to use ("tftp-hpa" or "dnsmasq")
         """
         self.test_harness_dir = Path(test_harness_dir)
         self.log = logging.getLogger(__name__)
         self.network_name = "tftp-test-network"
         self.server_container = None
         self.client_containers = []
-        self.image_name = "tftp-test-harness:latest"
+        self.server_type = server_type
+        
+        if server_type == "dnsmasq":
+            self.image_name = "tftp-test-harness-dnsmasq:latest"
+            self.dockerfile = "Dockerfile.dnsmasq"
+        elif server_type == "tftp-hpa":
+            self.image_name = "tftp-test-harness:latest"
+            self.dockerfile = "Dockerfile"
+        else:
+            raise ValueError(f"Unsupported server type: {server_type}. Use 'tftp-hpa' or 'dnsmasq'")
 
     def build_image(self) -> bool:
         """Build the Docker image."""
-        self.log.info("Building Docker image...")
+        self.log.info(f"Building Docker image for {self.server_type}...")
 
         try:
             result = subprocess.run(
-                ["docker", "build", "-t", self.image_name, "."],
+                ["docker", "build", "-f", self.dockerfile, "-t", self.image_name, "."],
                 cwd=self.test_harness_dir,
                 check=True,
                 capture_output=True,
                 text=True
             )
-            self.log.info("Docker image built successfully")
+            self.log.info(f"Docker image built successfully: {self.image_name}")
             return True
 
         except subprocess.CalledProcessError as e:
