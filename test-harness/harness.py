@@ -1030,6 +1030,10 @@ class TftpTestHarness:
         
         apalache_out_dir = repo_root / "_apalache-out"
         apalache_out_dir.mkdir(exist_ok=True, mode=0o777)
+        
+        # Server mode needs a server subdirectory
+        apalache_server_dir = apalache_out_dir / "server"
+        apalache_server_dir.mkdir(exist_ok=True, mode=0o777)
 
         # Docker run command for Apalache server
         docker_cmd = [
