@@ -21,10 +21,13 @@ jobs:
     - name: Run Apalache typecheck
       run: |
         mkdir -p ${{ runner.temp }}/apalache-tmp
+        mkdir -p ${{ runner.temp }}/apalache-out
         chmod 777 ${{ runner.temp }}/apalache-tmp
+        chmod 777 ${{ runner.temp }}/apalache-out
         docker run --rm \
           -v ${{ github.workspace }}/spec:/var/apalache \
           -v ${{ runner.temp }}/apalache-tmp:/var/apalache/tmp \
+          -v ${{ runner.temp }}/apalache-out:/var/apalache/_apalache-out \
           ghcr.io/apalache-mc/apalache:latest \
           typecheck MC2_tftp.tla
 
@@ -43,10 +46,13 @@ jobs:
       run: |
         set +e  # Don't exit on error
         mkdir -p ${{ runner.temp }}/apalache-tmp
+        mkdir -p ${{ runner.temp }}/apalache-out
         chmod 777 ${{ runner.temp }}/apalache-tmp
+        chmod 777 ${{ runner.temp }}/apalache-out
         docker run --rm \
           -v ${{ github.workspace }}/spec:/var/apalache \
           -v ${{ runner.temp }}/apalache-tmp:/var/apalache/tmp \
+          -v ${{ runner.temp }}/apalache-out:/var/apalache/_apalache-out \
           ghcr.io/apalache-mc/apalache:latest \
           check --inv=RecvOneDataBlockEx MC2_tftp.tla
         
