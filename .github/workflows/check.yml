@@ -21,6 +21,7 @@ jobs:
     - name: Run Apalache typecheck
       run: |
         docker run --rm \
+          --user $(id -u):$(id -g) \
           -v ${{ github.workspace }}/spec:/var/apalache \
           ghcr.io/apalache-mc/apalache:latest \
           typecheck MC2_tftp.tla
@@ -40,6 +41,7 @@ jobs:
       run: |
         set +e  # Don't exit on error
         docker run --rm \
+          --user $(id -u):$(id -g) \
           -v ${{ github.workspace }}/spec:/var/apalache \
           ghcr.io/apalache-mc/apalache:latest \
           check --inv=RecvOneDataBlockEx MC2_tftp.tla
