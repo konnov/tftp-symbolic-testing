@@ -103,6 +103,12 @@ echo "TFTP server watchdog started with PID $TFTPD_PID"\n\
 # Start client control server if CLIENT_IP is set\n\
 if [ -n "${CLIENT_IP}" ]; then\n\
   echo "Starting TFTP client control server on ${CLIENT_IP}:${CONTROL_PORT:-15000}"\n\
+  \n\
+  # Start tcpdump for client traffic capture\n\
+  tcpdump -i any -n -s 0 -w /var/log/tftp_client.pcap udp 2>&1 | stdbuf -oL -eL tee /dev/stderr &\n\
+  TCPDUMP_CLIENT_PID=$!\n\
+  echo "Started client tcpdump with PID $TCPDUMP_CLIENT_PID (saving to /var/log/tftp_client.pcap)"\n\
+  \n\
   python3 /usr/local/bin/tftp_client.py \\\n\
     --client-ip ${CLIENT_IP} \\\n\
     --server-ip ${SERVER_IP} \\\n\

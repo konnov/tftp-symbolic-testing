@@ -171,11 +171,8 @@ class DockerManager:
                 "-e", f"SERVER_IP={self.SERVER_IP}",
                 "-e", f"CONTROL_PORT={self.CONTROL_PORT}",
                 "-p", f"{host_port}:{self.CONTROL_PORT}",  # Map unique host port to container's CONTROL_PORT
-                self.image_name,
-                "python3", "/usr/local/bin/tftp_client.py",
-                "--client-ip", client_ip,
-                "--server-ip", self.SERVER_IP,
-                "--control-port", str(self.CONTROL_PORT)
+                self.image_name
+                # Let the container use its default CMD from Dockerfile which runs start.sh
             ]
 
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
@@ -294,6 +291,18 @@ class DockerManager:
     def get_pcap(self) -> Optional[bytes]:
         """Get the pcap file from the TFTP server container."""
         try:
+            # Kill tcpdump to ensure the pcap file is properly closed and flushed
+            # Using pkill with -TERM (default) gives tcpdump a chance to flush buffers
+            subprocess.run(
+                ["docker", "exec", "tftp-server", "pkill", "-TERM", "tcpdump"],
+                capture_output=True,
+                timeout=5
+            )
+            # Give tcpdump a moment to flush and close the file
+            import time
+            time.sleep(0.5)
+            
+            # Now read the pcap file
             result = subprocess.run(
                 ["docker", "exec", "tftp-server", "cat", "/var/log/tftp.pcap"],
                 capture_output=True,
@@ -305,6 +314,38 @@ class DockerManager:
             return None
         except Exception as e:
             self.log.error(f"Unexpected error getting pcap file: {e}")
+            return None
+
+    def get_client_pcap(self, client_ip: str) -> Optional[bytes]:
+        """Get the pcap file from a specific client container."""
+        container_name = f"tftp-client-{client_ip.replace('.', '-')}"
+        self.log.info(f"Attempting to retrieve pcap from {container_name}")
+        try:
+            # Kill tcpdump to ensure the pcap file is properly closed and flushed
+            kill_result = subprocess.run(
+                ["docker", "exec", container_name, "pkill", "-TERM", "tcpdump"],
+                capture_output=True,
+                timeout=5
+            )
+            self.log.info(f"Killed tcpdump in {container_name}: exit={kill_result.returncode}")
+            
+            # Give tcpdump a moment to flush and close the file
+            import time
+            time.sleep(0.5)
+            
+            # Now read the pcap file
+            result = subprocess.run(
+                ["docker", "exec", container_name, "cat", "/var/log/tftp_client.pcap"],
+                capture_output=True,
+                check=True
+            )
+            self.log.info(f"Retrieved {len(result.stdout)} bytes from {container_name}")
+            return result.stdout
+        except subprocess.CalledProcessError as e:
+            self.log.error(f"Failed to get client pcap for {client_ip}: returncode={e.returncode}, stderr={e.stderr.decode() if e.stderr else 'none'}")
+            return None
+        except Exception as e:
+            self.log.error(f"Unexpected error getting client pcap for {client_ip}: {e}")
             return None
 
     def stop_server(self):

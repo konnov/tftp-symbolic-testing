@@ -517,15 +517,26 @@ class TftpTestHarness:
                     f.write(client_logs)
                 self.log.info(f"TFTP client logs for {client_ip} saved to {client_logs_file}")
             
-            # Save pcap file for packet inspection
-            pcap_file = run_dir / "tftp_capture.pcap"
+            # Save pcap file for packet inspection (server)
+            pcap_file = run_dir / "tftp_server_capture.pcap"
             pcap_data = self.docker.get_pcap()
             if pcap_data:
                 with open(pcap_file, 'wb') as f:
                     f.write(pcap_data)
-                self.log.info(f"TFTP packet capture saved to {pcap_file}")
+                self.log.info(f"TFTP server packet capture saved to {pcap_file}")
             else:
-                self.log.warning("Failed to retrieve pcap file")
+                self.log.warning("Failed to retrieve server pcap file")
+            
+            # Save pcap files from client containers
+            for client_ip in DockerManager.CLIENT_IPS:
+                client_pcap_file = run_dir / f"tftp_client_{client_ip.split('.')[-1]}_capture.pcap"
+                client_pcap_data = self.docker.get_client_pcap(client_ip)
+                if client_pcap_data:
+                    with open(client_pcap_file, 'wb') as f:
+                        f.write(client_pcap_data)
+                    self.log.info(f"TFTP client {client_ip} packet capture saved to {client_pcap_file}")
+                else:
+                    self.log.warning(f"Failed to retrieve client pcap for {client_ip}")
         
         return True
 
@@ -1493,15 +1504,26 @@ class TftpTestHarness:
                     f.write(client_logs)
                 self.log.info(f"TFTP client logs for {client_ip} saved to {client_logs_file}")
             
-            # Save pcap file for packet inspection
-            pcap_file = run_dir / "tftp_capture.pcap"
+            # Save pcap file for packet inspection (server)
+            pcap_file = run_dir / "tftp_server_capture.pcap"
             pcap_data = self.docker.get_pcap()
             if pcap_data:
                 with open(pcap_file, 'wb') as f:
                     f.write(pcap_data)
-                self.log.info(f"TFTP packet capture saved to {pcap_file}")
+                self.log.info(f"TFTP server packet capture saved to {pcap_file}")
             else:
-                self.log.warning("Failed to retrieve pcap file")
+                self.log.warning("Failed to retrieve server pcap file")
+            
+            # Save pcap files from client containers
+            for client_ip in DockerManager.CLIENT_IPS:
+                client_pcap_file = run_dir / f"tftp_client_{client_ip.split('.')[-1]}_capture.pcap"
+                client_pcap_data = self.docker.get_client_pcap(client_ip)
+                if client_pcap_data:
+                    with open(client_pcap_file, 'wb') as f:
+                        f.write(client_pcap_data)
+                    self.log.info(f"TFTP client {client_ip} packet capture saved to {client_pcap_file}")
+                else:
+                    self.log.warning(f"Failed to retrieve client pcap for {client_ip}")
 
         self.log.info(f"=== Test run {self.test_run_number} completed and saved to {run_dir} ===")
 
