@@ -1030,37 +1030,19 @@ class TftpTestHarness:
         
         apalache_out_dir = repo_root / "_apalache-out"
         apalache_out_dir.mkdir(exist_ok=True, mode=0o777)
-        
-        # In CI environments, we may need to run as the current user to avoid permission issues
-        # Get current user ID and group ID
-        import pwd
-        try:
-            uid = os.getuid()
-            gid = os.getgid()
-            user_spec = f"{uid}:{gid}"
-        except AttributeError:
-            # Windows doesn't have getuid/getgid
-            user_spec = None
 
         # Docker run command for Apalache server
         docker_cmd = [
             "docker", "run",
             "-d",    # Run in detached mode
             "--name", "apalache-server",  # Named container for easy management
-        ]
-        
-        # Add user specification if available (Linux/macOS)
-        if user_spec:
-            docker_cmd.extend(["--user", user_spec])
-        
-        docker_cmd.extend([
             "-v", f"{repo_root}:/var/apalache",  # Mount repository root
             "-p", f"{port}:{port}",  # Expose port
             "ghcr.io/apalache-mc/apalache:latest",
             "server",
             "--server-type=explorer",
             f"--port={port}"
-        ])
+        ]
 
         try:
             # Start the Docker container
