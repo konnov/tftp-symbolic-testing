@@ -1025,15 +1025,20 @@ class TftpTestHarness:
         
         # Create directories that Apalache needs with proper permissions
         import os
+        import stat
+        
         tmp_dir = repo_root / "tmp"
-        tmp_dir.mkdir(exist_ok=True, mode=0o777)
+        tmp_dir.mkdir(exist_ok=True)
+        os.chmod(tmp_dir, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)  # 777
         
         apalache_out_dir = repo_root / "_apalache-out"
-        apalache_out_dir.mkdir(exist_ok=True, mode=0o777)
+        apalache_out_dir.mkdir(exist_ok=True)
+        os.chmod(apalache_out_dir, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)  # 777
         
         # Server mode needs a server subdirectory
         apalache_server_dir = apalache_out_dir / "server"
-        apalache_server_dir.mkdir(exist_ok=True, mode=0o777)
+        apalache_server_dir.mkdir(exist_ok=True)
+        os.chmod(apalache_server_dir, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)  # 777
 
         # Docker run command for Apalache server
         docker_cmd = [
