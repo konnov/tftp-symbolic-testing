@@ -460,6 +460,28 @@ class TftpTestHarness:
 
         self.log.info(f"Successfully replayed {step} transitions")
         
+        # Wait a bit for any remaining packets to arrive
+        if use_docker and self.docker:
+            import time
+            self.log.info("Waiting 2 seconds for remaining packets...")
+            time.sleep(2)
+            
+            # Retrieve any remaining packets from clients
+            self.log.info("Retrieving remaining packets from clients...")
+            for src_ip in DockerManager.CLIENT_IPS:
+                cmd = {'type': 'get_packets'}
+                response = self.docker.send_command_to_client(src_ip, cmd)
+                if response:
+                    packets = response.get('packets', [])
+                    if packets:
+                        self.log.info(f"  Client {src_ip} has {len(packets)} remaining packet(s)")
+                        for sut_packet in packets:
+                            spec_packet = self._spec_packet_from_sut_response(sut_packet)
+                            self.log.info(f"  REMAINING SUT PACKET: {spec_packet}")
+                            self.log.info(f"    Raw packet: {sut_packet}")
+                    else:
+                        self.log.info(f"  Client {src_ip} has no remaining packets")
+        
         # Save the final trace
         trace_data = self.get_current_trace()
         if trace_data:
