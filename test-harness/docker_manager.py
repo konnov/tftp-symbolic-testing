@@ -23,7 +23,7 @@ class DockerManager:
     # Constants from MC2_tftp.tla
     SERVER_IP = "172.20.0.10"
     CLIENT_IPS = ["172.20.0.11", "172.20.0.12"]
-    PORT_RANGE = "1024:1027"
+    PORT_RANGE = "1024:1040"
     CONTROL_PORT = 15000  # Changed from 5000 to avoid conflict with macOS ControlCenter
 
     def __init__(self, test_harness_dir: str, server_type: str = "tftp-hpa"):
@@ -257,7 +257,7 @@ class DockerManager:
         """Get the syslog from the TFTP server container."""
         try:
             result = subprocess.run(
-                ["docker", "exec", "tftp-server", "cat", "/var/log/syslog"],
+                ["docker", "exec", "tftp-server", "cat", "/var/log/tftp_syslog.log"],
                 capture_output=True,
                 text=True,
                 check=True
@@ -291,6 +291,9 @@ class DockerManager:
     def get_pcap(self) -> Optional[bytes]:
         """Get the pcap file from the TFTP server container."""
         try:
+            import time
+            # Wait a moment to ensure all packets are captured
+            time.sleep(1)
             # Kill tcpdump to ensure the pcap file is properly closed and flushed
             # Using pkill with -TERM (default) gives tcpdump a chance to flush buffers
             subprocess.run(
@@ -299,8 +302,7 @@ class DockerManager:
                 timeout=5
             )
             # Give tcpdump a moment to flush and close the file
-            import time
-            time.sleep(0.5)
+            time.sleep(1)
             
             # Now read the pcap file
             result = subprocess.run(
@@ -321,6 +323,9 @@ class DockerManager:
         container_name = f"tftp-client-{client_ip.replace('.', '-')}"
         self.log.info(f"Attempting to retrieve pcap from {container_name}")
         try:
+            import time
+            # Wait a moment to ensure all packets are captured
+            time.sleep(1)
             # Kill tcpdump to ensure the pcap file is properly closed and flushed
             kill_result = subprocess.run(
                 ["docker", "exec", container_name, "pkill", "-TERM", "tcpdump"],
@@ -330,8 +335,7 @@ class DockerManager:
             self.log.info(f"Killed tcpdump in {container_name}: exit={kill_result.returncode}")
             
             # Give tcpdump a moment to flush and close the file
-            import time
-            time.sleep(0.5)
+            time.sleep(1)
             
             # Now read the pcap file
             result = subprocess.run(

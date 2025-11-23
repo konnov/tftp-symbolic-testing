@@ -44,9 +44,18 @@ run_tftpd_with_watchdog() {\n\
   local restart_count=0\n\
   local max_restarts=1\n\
   \n\
+  # Configure rsyslog to capture tftp messages\n\
+  # Create a rule to log daemon facility messages (which tftp uses) to a dedicated file\n\
+  mkdir -p /etc/rsyslog.d\n\
+  echo "daemon.* /var/log/tftp_syslog.log" > /etc/rsyslog.d/50-tftp.conf\n\
+  \n\
+  # Create the log file and set permissions\n\
+  touch /var/log/tftp_syslog.log\n\
+  chmod 644 /var/log/tftp_syslog.log\n\
+  \n\
   # Start rsyslog to capture syslog messages\n\
   rsyslogd\n\
-  echo "Started rsyslog daemon"\n\
+  echo "Started rsyslog daemon (tftp logs will be in /var/log/tftp_syslog.log)"\n\
   \n\
   while [ $restart_count -lt $max_restarts ]; do\n\
     echo "Starting TFTP server (attempt $((restart_count + 1))/$max_restarts)"\n\
@@ -67,8 +76,9 @@ run_tftpd_with_watchdog() {\n\
     # Start TFTP server in foreground with verbose logging\n\
     # Using stdbuf to disable buffering so we see output immediately\n\
     # Redirect both stdout and stderr to ensure we capture everything\n\
+    # -vv: Verbose logging (warnings and debug messages)\n\
     exec 2>&1\n\
-    stdbuf -oL -eL in.tftpd -vv --foreground --address ${SERVER_IP}:69 \\\n\
+    stdbuf -oL -eL in.tftpd -vvvv --foreground --address ${SERVER_IP}:69 \\\n\
       --user nobody --port-range ${PORT_RANGE} \\\n\
       --secure /var/tftp\n\
     \n\

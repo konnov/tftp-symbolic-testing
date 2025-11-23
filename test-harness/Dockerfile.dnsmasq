@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     net-tools \
     tcpdump \
     coreutils \
+    rsyslog \
     && rm -rf /var/lib/apt/lists/*
 
 # Create TFTP root directory
@@ -43,9 +44,25 @@ run_dnsmasq_with_watchdog() {\n\
   local restart_count=0\n\
   local max_restarts=1\n\
   \n\
+  # Convert PORT_RANGE from colon format (1024:1027) to comma format (1024,1027) for dnsmasq\n\
+  DNSMASQ_PORT_RANGE=$(echo ${PORT_RANGE} | tr ':' ',')\n\
+  \n\
+  # Configure rsyslog to capture tftp messages\n\
+  # Create a rule to log daemon facility messages (which dnsmasq uses) to a dedicated file\n\
+  mkdir -p /etc/rsyslog.d\n\
+  echo "daemon.* /var/log/tftp_syslog.log" > /etc/rsyslog.d/50-tftp.conf\n\
+  \n\
+  # Create the log file and set permissions\n\
+  touch /var/log/tftp_syslog.log\n\
+  chmod 644 /var/log/tftp_syslog.log\n\
+  \n\
+  # Start rsyslog to capture syslog messages\n\
+  rsyslogd\n\
+  echo "Started rsyslog daemon (tftp logs will be in /var/log/tftp_syslog.log)"\n\
+  \n\
   while [ $restart_count -lt $max_restarts ]; do\n\
     echo "Starting dnsmasq TFTP server (attempt $((restart_count + 1))/$max_restarts)"\n\
-    echo "Command: dnsmasq --no-daemon --log-queries --log-dhcp --log-facility=- --enable-tftp --tftp-root=/var/tftp --tftp-secure --tftp-port-range=${PORT_RANGE} --listen-address=${SERVER_IP} --bind-interfaces --port=0"\n\
+    echo "Command: dnsmasq --no-daemon --log-queries --log-dhcp --log-facility=- --enable-tftp --tftp-root=/var/tftp --tftp-secure --tftp-port-range=${DNSMASQ_PORT_RANGE} --listen-address=${SERVER_IP} --bind-interfaces --port=0"\n\
     \n\
     # Start tcpdump in background to capture TFTP traffic\n\
     # -l: Line buffered output (immediate output per line)\n\
@@ -74,7 +91,7 @@ run_dnsmasq_with_watchdog() {\n\
     exec 2>&1\n\
     stdbuf -oL -eL dnsmasq --no-daemon --log-queries --log-dhcp \\\n\
       --log-facility=- --enable-tftp --tftp-root=/var/tftp \\\n\
-      --tftp-secure --tftp-port-range=${PORT_RANGE} \\\n\
+      --tftp-secure --tftp-port-range=${DNSMASQ_PORT_RANGE} \\\n\
       --listen-address=${SERVER_IP} --bind-interfaces --port=0\n\
     \n\
     exit_code=$?\n\

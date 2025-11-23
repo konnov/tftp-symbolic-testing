@@ -10,6 +10,10 @@ on:
 jobs:
   test-harness:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        server: [tftp-hpa, dnsmasq]
+      fail-fast: false
     
     steps:
     - name: Checkout repository
@@ -32,13 +36,18 @@ jobs:
     - name: Pull Apalache Docker image
       run: docker pull ghcr.io/apalache-mc/apalache:latest
     
-    - name: Build TFTP Docker image
+    - name: Build TFTP Docker image (${{ matrix.server }})
       working-directory: ./test-harness
-      run: docker build -t tftp-test-harness:latest .
+      run: |
+        if [ "${{ matrix.server }}" = "dnsmasq" ]; then
+          docker build -t tftp-test-harness-dnsmasq:latest -f Dockerfile.dnsmasq .
+        else
+          docker build -t tftp-test-harness:latest .
+        fi
     
-    - name: Run test harness
+    - name: Run test harness (${{ matrix.server }})
       working-directory: ./test-harness
-      run: poetry run python harness.py --docker --steps=50 --tests=10
+      run: poetry run python harness.py --docker --steps=50 --tests=10 --server=${{ matrix.server }}
     
     - name: Install Node.js for Mermaid CLI
       if: always()
@@ -65,7 +74,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: test-results
+        name: test-results-${{ matrix.server }}
         path: test-harness/test-results/
         retention-days: 7
     
@@ -73,7 +82,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: diagrams
+        name: diagrams-${{ matrix.server }}
         path: test-harness/diagrams/
         retention-days: 7
     
@@ -81,6 +90,6 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: logs
+        name: logs-${{ matrix.server }}
         path: test-harness/logs/
         retention-days: 7
