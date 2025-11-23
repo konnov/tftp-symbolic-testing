@@ -1,14 +1,14 @@
-/* Overall page */
+/* ---------- Global ---------- */
 
 body {
-  background: #000000;
-  color: #00ff80;
+  background: #0d0a04;            /* rich dark brown/black */
+  color: #ffcc66;                 /* soft amber */
   font-family: "Fira Code", "SF Mono", Menlo, Consolas, monospace;
-  text-shadow: 0 0 4px #00ff80;
+  text-shadow: 0 0 2px #ffcc66;   /* subtle glow */
 }
 
 a {
-  color: #ffff55;
+  color: #ffd88a;
   text-decoration: none;
 }
 
@@ -16,12 +16,12 @@ a:hover {
   text-decoration: underline;
 }
 
-/* Content container from minima theme */
+/* Github Pages minima theme wrapper */
 .wrapper {
   max-width: 960px;
 }
 
-/* Hero section */
+/* ---------- Hero Section ---------- */
 
 .hero {
   display: flex;
@@ -34,40 +34,44 @@ a:hover {
 .hero-logo {
   max-width: 260px;
   image-rendering: pixelated;
-  border: 2px solid #00ff80;
+  border: 2px solid #ffcc66;
   padding: 0.5rem;
-  background: #001010;
+  background: #1a1308;      /* subtle warm background */
 }
 
 .hero-text h1 {
   font-size: 2.2rem;
   margin-bottom: 0.4rem;
+  color: #ffdd99;
 }
 
 .tagline {
   font-size: 1.1rem;
   margin-top: 0.2rem;
   margin-bottom: 0.8rem;
+  color: #ffe7b8;
 }
 
 .tagline .accent {
-  color: #55ff99;
+  color: #ffe7b8;
 }
 
 .hero-cta {
   font-size: 0.95rem;
+  color: #ffd88a;
 }
 
-/* Content basics */
+/* ---------- Content ---------- */
 
 h2, h3, h4 {
-  color: #55ff99;
-  text-shadow: 0 0 4px #55ff99;
+  color: #ffdd99;
+  text-shadow: 0 0 2px #ffdd99;
 }
 
 code, pre {
-  background: #001010;
-  border: 1px solid #004422;
+  background: #1a1308;
+  border: 1px solid #4d3c19;
+  color: #ffd88a;
 }
 
 pre {
@@ -75,23 +79,24 @@ pre {
   overflow-x: auto;
 }
 
-/* Footer */
+/* ---------- Footer ---------- */
 
 .footer {
   margin-top: 3rem;
   padding-top: 1rem;
-  border-top: 1px solid #00ff80;
+  border-top: 1px solid #ffcc66;
   font-size: 0.8rem;
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  color: #ffcc66;
 }
 
 .footer .sep {
   opacity: 0.7;
 }
 
-/* Mobile tweaks */
+/* ---------- Mobile Tweaks ---------- */
 
 @media (max-width: 640px) {
   .hero {
