@@ -42,6 +42,22 @@ jobs:
     - name: Pull Apalache Docker image
       run: docker pull ghcr.io/apalache-mc/apalache:latest
     
+    - name: Prepare Apalache directories
+      run: |
+        mkdir -p ${{ runner.temp }}/apalache-tmp
+        mkdir -p ${{ runner.temp }}/apalache-out
+        chmod 777 ${{ runner.temp }}/apalache-tmp
+        chmod 777 ${{ runner.temp }}/apalache-out
+    
+    - name: Run Apalache check --length=5
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}/spec:/var/apalache \
+          -v ${{ runner.temp }}/apalache-tmp:/var/apalache/tmp \
+          -v ${{ runner.temp }}/apalache-out:/var/apalache/_apalache-out \
+          ghcr.io/apalache-mc/apalache:latest \
+          check --length=5 MC2_tftp.tla
+    
     - name: Run Apalache check (expecting error)
       run: |
         set +e  # Don't exit on error
