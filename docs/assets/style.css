@@ -1,0 +1,105 @@
+/* Overall page */
+
+body {
+  background: #000000;
+  color: #00ff80;
+  font-family: "Fira Code", "SF Mono", Menlo, Consolas, monospace;
+  text-shadow: 0 0 4px #00ff80;
+}
+
+a {
+  color: #ffff55;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Content container from minima theme */
+.wrapper {
+  max-width: 960px;
+}
+
+/* Hero section */
+
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.5rem;
+  margin: 1.5rem 0 2.5rem 0;
+}
+
+.hero-logo {
+  max-width: 260px;
+  image-rendering: pixelated;
+  border: 2px solid #00ff80;
+  padding: 0.5rem;
+  background: #001010;
+}
+
+.hero-text h1 {
+  font-size: 2.2rem;
+  margin-bottom: 0.4rem;
+}
+
+.tagline {
+  font-size: 1.1rem;
+  margin-top: 0.2rem;
+  margin-bottom: 0.8rem;
+}
+
+.tagline .accent {
+  color: #55ff99;
+}
+
+.hero-cta {
+  font-size: 0.95rem;
+}
+
+/* Content basics */
+
+h2, h3, h4 {
+  color: #55ff99;
+  text-shadow: 0 0 4px #55ff99;
+}
+
+code, pre {
+  background: #001010;
+  border: 1px solid #004422;
+}
+
+pre {
+  padding: 0.7rem 0.9rem;
+  overflow-x: auto;
+}
+
+/* Footer */
+
+.footer {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid #00ff80;
+  font-size: 0.8rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.footer .sep {
+  opacity: 0.7;
+}
+
+/* Mobile tweaks */
+
+@media (max-width: 640px) {
+  .hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .hero-logo {
+    max-width: 100%;
+  }
+}
