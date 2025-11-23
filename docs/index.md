@@ -3,15 +3,13 @@ title: "TFTP-Symbolic-Testing"
 layout: default
 ---
 
-# TFTP-Symbolic-Testing
-
 <link rel="stylesheet" href="assets/style.css">
 
 <div class="hero">
   <img src="assets/logo-tftp-symbolic-testing.png" alt="TFTP-Symbolic-Testing Logo" class="hero-logo" />
 
   <div class="hero-text">
-    <h1>TFTP-Symbolic-Testing</h1>
+    <h1>TFTP Symbolic Testing</h1>
     <p class="tagline">
       Retro-style but modern <span class="accent">symbolic testing</span> for TFTP servers.
     </p>
