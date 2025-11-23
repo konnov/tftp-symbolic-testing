@@ -13,6 +13,10 @@ This repository accompanies my talk at Nvidia FM Week 2025. For professional
 consulting, verification reports, or adaptation of these methods, see
 [konnov.phd][] and [protocols-made-fun.com][].
 
+<p align="center">
+  <img src="docs/assets/logo-tftp-symbolic-testing.png" width="320">
+</p>
+
 ## Latest Test Results
 
 The CI automatically runs the test harness and generates visualization diagrams. You can download the latest artifacts from the [Test Harness workflow runs](https://github.com/konnov/tftp-symbolic-testing/actions/workflows/harness.yml):
