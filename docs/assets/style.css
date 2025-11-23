@@ -4,7 +4,6 @@ body {
   background: #0d0a04;            /* rich dark brown/black */
   color: #ffcc66;                 /* soft amber */
   font-family: "Fira Code", "SF Mono", Menlo, Consolas, monospace;
-  text-shadow: 0 0 2px #ffcc66;   /* subtle glow */
 }
 
 a {
@@ -27,7 +26,7 @@ a:hover {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 1.5rem;
+  gap: clamp(0.8rem, 2vw, 1.5rem);
   margin: 1.5rem 0 2.5rem 0;
 }
 
@@ -65,7 +64,6 @@ a:hover {
 
 h2, h3, h4 {
   color: #ffdd99;
-  text-shadow: 0 0 2px #ffdd99;
 }
 
 code, pre {
