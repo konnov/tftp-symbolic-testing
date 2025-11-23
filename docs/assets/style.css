@@ -32,7 +32,7 @@ a:hover {
 }
 
 .hero-logo {
-  max-width: 260px;
+  width: 260px;
   image-rendering: pixelated;
   border: 2px solid #ffcc66;
   padding: 0.5rem;
@@ -77,6 +77,36 @@ code, pre {
 pre {
   padding: 0.7rem 0.9rem;
   overflow-x: auto;
+}
+
+/* ---------- Code blocks (GitHub Pages / Minima fix) ---------- */
+
+.highlight {
+  background: #1a1308 !important;    /* dark amber background */
+  border: 1px solid #4d3c19 !important;
+  padding: 0.7rem 0.9rem;
+  overflow-x: auto;
+}
+
+.highlight pre,
+.highlight code {
+  background: transparent !important;
+  color: #ffd88a !important;          /* calm amber text */
+  text-shadow: none !important;
+  font-family: "Fira Code", "SF Mono", Menlo, Consolas, monospace;
+}
+
+pre code {
+  background: transparent !important;
+}
+
+p code,
+li code {
+  background: #1a1308;
+  color: #ffd88a;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  border: 1px solid #4d3c19;
 }
 
 /* ---------- Footer ---------- */
