@@ -1,0 +1,145 @@
+FROM golang:1.24-alpine AS builder
+
+# Install git (needed for go get)
+RUN apk add --no-cache git
+
+# Clone and build gotftpd
+RUN go install github.com/pin/golang-tftp-example/src/gotftpd@latest
+
+FROM python:3.11-alpine
+
+# Copy the gotftpd binary from builder
+COPY --from=builder /go/bin/gotftpd /usr/local/bin/gotftpd
+
+# Install dependencies
+RUN apk add --no-cache \
+    bash \
+    iproute2 \
+    iputils \
+    tcpdump \
+    rsyslog \
+    coreutils
+
+# Create TFTP root directory
+RUN mkdir -p /var/tftp
+
+# Copy test files
+COPY files/ /var/tftp
+
+# Set permissions
+RUN chmod -R 755 /var/tftp && \
+    chown -R nobody:nogroup /var/tftp
+
+# Copy the TFTP client script
+COPY tftp_client_docker.py /usr/local/bin/tftp_client.py
+RUN chmod +x /usr/local/bin/tftp_client.py
+
+# Expose ports
+# Port 69 is the TFTP control port
+# Ports 1024-1040 are the data transfer ports
+# Port 5000 is the TCP control port for the client
+#EXPOSE 69 1024-1040 5000
+
+# Create startup script  
+RUN echo -e '#!/bin/bash\n\
+set -e\n\
+\n\
+# Docker Compose already assigns the IP via ipv4_address, no manual configuration needed\n\
+\n\
+# Watchdog function to monitor TFTP server\n\
+run_gotftpd_with_watchdog() {\n\
+  local restart_count=0\n\
+  local max_restarts=1\n\
+  \n\
+  # Configure rsyslog to capture tftp messages\n\
+  # Create a rule to log daemon facility messages (which tftp uses) to a dedicated file\n\
+  mkdir -p /etc/rsyslog.d\n\
+  echo "daemon.* /var/log/tftp_syslog.log" > /etc/rsyslog.d/50-tftp.conf\n\
+  \n\
+  # Create the log file and set permissions before starting rsyslog\n\
+  touch /var/log/tftp_syslog.log\n\
+  chmod 666 /var/log/tftp_syslog.log\n\
+  \n\
+  # Start rsyslog daemon\n\
+  rsyslogd\n\
+  echo "Started rsyslog daemon (tftp logs will be in /var/log/tftp_syslog.log)"\n\
+  \n\
+  # Change to TFTP directory so gotftpd serves files from there\n\
+  cd /var/tftp\n\
+  \n\
+  while [ $restart_count -lt $max_restarts ]; do\n\
+    echo "Starting gotftpd server (attempt $((restart_count + 1))/$max_restarts)"\n\
+    echo "Command: gotftpd -p 69"\n\
+    echo "Working directory: $(pwd)"\n\
+    \n\
+    # Start tcpdump in background to capture TFTP traffic\n\
+    # -l: Line buffered output (immediate output per line)\n\
+    # -U: Packet buffered output (don'\''t wait for buffer to fill)\n\
+    # -i any: Capture on all interfaces\n\
+    # -n: Don'\''t resolve addresses\n\
+    # -s 0: Capture full packets\n\
+    # -vv: Very verbose\n\
+    # -w: Write raw packets to pcap file for later analysis\n\
+    tcpdump -i any -n -s 0 -w /var/log/tftp.pcap udp 2>&1 | stdbuf -oL -eL tee /dev/stderr &\n\
+    TCPDUMP_PID=$!\n\
+    echo "Started tcpdump with PID $TCPDUMP_PID (saving to /var/log/tftp.pcap)"\n\
+    \n\
+    # Start gotftpd server\n\
+    # gotftpd options:\n\
+    # -p: Port to listen on (default 69)\n\
+    # Note: gotftpd serves files from the current working directory\n\
+    # Note: gotftpd does not support port-range configuration\n\
+    # Note: gotftpd does not support binding to specific IP address\n\
+    # Using stdbuf to disable buffering so we see output immediately\n\
+    # Redirect both stdout and stderr to ensure we capture everything\n\
+    exec 2>&1\n\
+    stdbuf -oL -eL gotftpd -p 69\n\
+    \n\
+    exit_code=$?\n\
+    timestamp=$(date "+%Y-%m-%d %H:%M:%S")\n\
+    \n\
+    if [ $exit_code -eq 0 ]; then\n\
+      echo "[$timestamp] gotftpd server exited normally with code 0"\n\
+      break\n\
+    else\n\
+      echo "[$timestamp] !!! GOTFTPD SERVER CRASHED !!!"\n\
+      echo "[$timestamp] Exit code: $exit_code"\n\
+      echo "[$timestamp] Signal: $((exit_code - 128))"\n\
+      restart_count=$((restart_count + 1))\n\
+      \n\
+      if [ $restart_count -lt $max_restarts ]; then\n\
+        echo "[$timestamp] Restarting gotftpd server in 2 seconds..."\n\
+        sleep 2\n\
+      else\n\
+        echo "[$timestamp] Maximum restart attempts reached. Giving up."\n\
+        return $exit_code\n\
+      fi\n\
+    fi\n\
+  done\n\
+}\n\
+\n\
+run_gotftpd_with_watchdog &\n\
+TFTPD_PID=$!\n\
+echo "gotftpd server watchdog started with PID $TFTPD_PID"\n\
+\n\
+if [ -n "${CLIENT_IP}" ]; then\n\
+  echo "Starting TFTP client control server on ${CLIENT_IP}:${CONTROL_PORT:-15000}"\n\
+  \n\
+  # Start tcpdump for client traffic capture\n\
+  tcpdump -i any -n -s 0 -w /var/log/tftp_client.pcap udp 2>&1 | stdbuf -oL -eL tee /dev/stderr &\n\
+  TCPDUMP_CLIENT_PID=$!\n\
+  echo "Started client tcpdump with PID $TCPDUMP_CLIENT_PID (saving to /var/log/tftp_client.pcap)"\n\
+  \n\
+  python3 /usr/local/bin/tftp_client.py \\\n\
+    --client-ip ${CLIENT_IP} \\\n\
+    --server-ip ${SERVER_IP} \\\n\
+    --control-port ${CONTROL_PORT:-15000} &\n\
+  CLIENT_PID=$!\n\
+  echo "Client started with PID $CLIENT_PID"\n\
+fi\n\
+\n\
+# Wait for processes\n\
+wait\n\
+' > /usr/local/bin/start.sh && chmod +x /usr/local/bin/start.sh
+
+CMD ["/bin/bash", "/usr/local/bin/start.sh"]
