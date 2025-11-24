@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        server: [tftp-hpa, dnsmasq, busybox]
+        server: [tftp-hpa, dnsmasq, busybox, atftpd]
       fail-fast: false
     
     steps:
@@ -53,6 +53,8 @@ jobs:
           docker build -t tftp-test-harness-dnsmasq:latest -f Dockerfile.dnsmasq .
         elif [ "${{ matrix.server }}" = "busybox" ]; then
           docker buildx build --platform linux/arm64 --load -t tftp-test-harness-busybox:latest -f Dockerfile.busybox .
+        elif [ "${{ matrix.server }}" = "atftpd" ]; then
+          docker build -t tftp-test-harness-atftpd:latest -f Dockerfile.atftpd .
         else
           docker build -t tftp-test-harness:latest .
         fi
