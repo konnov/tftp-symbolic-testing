@@ -1548,7 +1548,7 @@ def main():
     parser.add_argument('--docker', action='store_true',
                         help='Enable Docker for actual TFTP operations')
     parser.add_argument('--server', type=str, default='tftp-hpa',
-                        choices=['tftp-hpa', 'dnsmasq', 'busybox', 'atftpd'],
+                        choices=['tftp-hpa', 'dnsmasq', 'busybox', 'atftpd', 'rs-tftpd'],
                         help='TFTP server implementation to test (default: tftp-hpa)')
     parser.add_argument('--tests', type=int, default=10,
                         help='Number of test runs to generate (default: 10)')
