@@ -32,7 +32,7 @@ class DockerManager:
 
         Args:
             test_harness_dir: Directory containing test harness files
-            server_type: Type of TFTP server to use ("tftp-hpa" or "dnsmasq")
+            server_type: Type of TFTP server to use ("tftp-hpa", "dnsmasq", or "busybox")
         """
         self.test_harness_dir = Path(test_harness_dir)
         self.log = logging.getLogger(__name__)
@@ -44,11 +44,14 @@ class DockerManager:
         if server_type == "dnsmasq":
             self.image_name = "tftp-test-harness-dnsmasq:latest"
             self.dockerfile = "Dockerfile.dnsmasq"
+        elif server_type == "busybox":
+            self.image_name = "tftp-test-harness-busybox:latest"
+            self.dockerfile = "Dockerfile.busybox"
         elif server_type == "tftp-hpa":
             self.image_name = "tftp-test-harness:latest"
             self.dockerfile = "Dockerfile"
         else:
-            raise ValueError(f"Unsupported server type: {server_type}. Use 'tftp-hpa' or 'dnsmasq'")
+            raise ValueError(f"Unsupported server type: {server_type}. Use 'tftp-hpa', 'dnsmasq', or 'busybox'")
 
     def build_image(self) -> bool:
         """Build the Docker image."""

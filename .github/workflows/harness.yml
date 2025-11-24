@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        server: [tftp-hpa, dnsmasq]
+        server: [tftp-hpa, dnsmasq, busybox]
       fail-fast: false
     
     steps:
@@ -36,11 +36,23 @@ jobs:
     - name: Pull Apalache Docker image
       run: docker pull ghcr.io/apalache-mc/apalache:latest
     
+    - name: Set up QEMU for multi-platform builds
+      if: matrix.server == 'busybox'
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm64
+    
+    - name: Set up Docker Buildx
+      if: matrix.server == 'busybox'
+      uses: docker/setup-buildx-action@v3
+    
     - name: Build TFTP Docker image (${{ matrix.server }})
       working-directory: ./test-harness
       run: |
         if [ "${{ matrix.server }}" = "dnsmasq" ]; then
           docker build -t tftp-test-harness-dnsmasq:latest -f Dockerfile.dnsmasq .
+        elif [ "${{ matrix.server }}" = "busybox" ]; then
+          docker buildx build --platform linux/arm64 --load -t tftp-test-harness-busybox:latest -f Dockerfile.busybox .
         else
           docker build -t tftp-test-harness:latest .
         fi
