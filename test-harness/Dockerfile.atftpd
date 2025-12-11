@@ -59,7 +59,7 @@ run_atftpd_with_watchdog() {\n\
   \n\
   while [ $restart_count -lt $max_restarts ]; do\n\
     echo "Starting atftpd server (attempt $((restart_count + 1))/$max_restarts)"\n\
-    echo "Command: atftpd --daemon --no-fork --verbose=7 --bind-address ${SERVER_IP} --port 69 /var/tftp"\n\
+    echo "Command: atftpd --daemon --no-fork --verbose=7 --trace --bind-address ${SERVER_IP} --port 69 /var/tftp"\n\
     \n\
     # Start tcpdump in background to capture TFTP traffic\n\
     # -l: Line buffered output (immediate output per line)\n\
@@ -78,6 +78,7 @@ run_atftpd_with_watchdog() {\n\
     # --daemon: Run as daemon\n\
     # --no-fork: Don'\''t fork to background (stay in foreground)\n\
     # --verbose=7: Maximum verbosity (0-7)\n\
+    # --trace: Log all sent and received packets\n\
     # --bind-address: IP address to bind to\n\
     # --port: Port to listen on (default 69)\n\
     # /var/tftp: TFTP root directory\n\
@@ -85,7 +86,7 @@ run_atftpd_with_watchdog() {\n\
     # Using stdbuf to disable buffering so we see output immediately\n\
     # Redirect both stdout and stderr to ensure we capture everything\n\
     exec 2>&1\n\
-    stdbuf -oL -eL atftpd --daemon --no-fork --verbose=7 --bind-address ${SERVER_IP} --port 69 /var/tftp\n\
+    stdbuf -oL -eL atftpd --daemon --no-fork --verbose=7 --trace --bind-address ${SERVER_IP} --port 69 /var/tftp\n\
     \n\
     exit_code=$?\n\
     timestamp=$(date "+%Y-%m-%d %H:%M:%S")\n\
